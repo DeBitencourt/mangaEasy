@@ -426,3 +426,40 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
 
   return results;
 }
+
+/**
+ * Fetches latest updates from the source homepage
+ */
+export async function fetchLatestUpdatesReal(source: string): Promise<SearchResult[]> {
+  const origin = `https://www.mangaread.org`;
+  const html = await fetchHtml(origin);
+  const root = parse(html);
+  const results: SearchResult[] = [];
+
+  const items = root.querySelectorAll('.page-item-detail.manga');
+  items.forEach((item) => {
+    const titleEl = item.querySelector('.post-title a, .post-title h3 a');
+    const title = titleEl?.textContent?.trim();
+    const href = titleEl?.getAttribute('href');
+
+    const imgEl = item.querySelector('.item-thumb img, img');
+    const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('data-lazy-src') || imgEl?.getAttribute('src');
+
+    if (title && href) {
+      let cover = imgUrl || '';
+      if (cover.startsWith('//')) {
+        cover = `https:${cover}`;
+      } else if (cover.startsWith('/')) {
+        cover = `${origin}${cover}`;
+      }
+
+      results.push({
+        title: title.replace(/\s+/g, ' '),
+        url: href,
+        coverUrl: cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+      });
+    }
+  });
+
+  return results;
+}

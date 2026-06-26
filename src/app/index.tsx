@@ -34,6 +34,9 @@ export default function HomeScreen() {
     searching,
     searchManga,
     clearSearchResults,
+    latestUpdates,
+    loadingLatest,
+    fetchLatestUpdates,
   } = useManga();
 
   const [searchInput, setSearchInput] = useState('');
@@ -277,23 +280,23 @@ export default function HomeScreen() {
 
         {/* Main Grid View */}
         <View style={styles.contentCanvas}>
-          {searching ? (
+          {searching || (loadingLatest && latestUpdates.length === 0) ? (
             <View style={styles.loadingWrapper}>
               <ActivityIndicator size="large" color="#8B5CF6" />
               <ThemedText type="small" themeColor="textSecondary" style={{ marginTop: Spacing.two }}>
-                Buscando títulos no site...
+                {searching ? 'Buscando títulos no site...' : 'Carregando últimos lançamentos...'}
               </ThemedText>
             </View>
           ) : (
             <FlatList
-              data={searchResults.length > 0 ? searchResults : PRESET_MANGAS}
+              data={searchInput.trim().length > 0 ? searchResults : latestUpdates}
               keyExtractor={(item) => item.url}
               numColumns={2}
               columnWrapperStyle={styles.gridRow}
               showsVerticalScrollIndicator={false}
               ListHeaderComponent={
                 <ThemedText type="smallBold" themeColor="textSecondary" style={styles.gridHeaderTitle}>
-                  {searchResults.length > 0 ? 'Resultados da Busca' : 'Mangás Recomendados'}
+                  {searchInput.trim().length > 0 ? 'Resultados da Busca' : 'Últimos Lançamentos'}
                 </ThemedText>
               }
               renderItem={({ item }) => (
@@ -327,6 +330,8 @@ export default function HomeScreen() {
                 </View>
               }
               contentContainerStyle={{ paddingBottom: BottomTabInset + Spacing.five }}
+              refreshing={loadingLatest}
+              onRefresh={fetchLatestUpdates}
             />
           )}
         </View>

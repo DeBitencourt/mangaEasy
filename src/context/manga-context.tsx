@@ -61,6 +61,9 @@ interface MangaContextType {
   searching: boolean;
   searchManga: (query: string) => Promise<void>;
   clearSearchResults: () => void;
+  latestUpdates: SearchResult[];
+  loadingLatest: boolean;
+  fetchLatestUpdates: () => Promise<void>;
 }
 
 const MangaContext = createContext<MangaContextType | undefined>(undefined);
@@ -143,6 +146,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   const [downloadHistory, setDownloadHistory] = useState<HistoryItem[]>([]);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [latestUpdates, setLatestUpdates] = useState<SearchResult[]>([]);
+  const [loadingLatest, setLoadingLatest] = useState(false);
 
   const downloadIntervals = useRef<Record<string, NodeJS.Timeout>>({});
   const downloadStateRef = useRef<Record<string, 'downloading' | 'paused' | 'cancelled' | 'completed'>>({});
@@ -155,6 +160,11 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     };
     initHistory();
   }, []);
+
+  // Fetch latest updates whenever activeSource changes
+  useEffect(() => {
+    fetchLatestUpdates();
+  }, [activeSource]);
 
   const clearDetails = () => setMangaDetails(null);
 
@@ -749,6 +759,58 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const fetchLatestUpdates = async () => {
+    setLoadingLatest(true);
+    if (Platform.OS === 'web') {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const mockLatest = [
+        {
+          title: 'World-Saving Is a Skill',
+          url: 'https://mangaread.org/manga/world-saving-is-a-skill/',
+          coverUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=400&q=80',
+        },
+        {
+          title: 'Reveries of the Moonlight (2025)',
+          url: 'https://mangaread.org/manga/reveries-of-the-moonlight-2025/',
+          coverUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&q=80',
+        },
+        {
+          title: 'Gatekeeper of the Boundless Worlds',
+          url: 'https://mangaread.org/manga/gatekeeper-of-the-boundless-worlds/',
+          coverUrl: 'https://images.unsplash.com/photo-1560169897-fc0cdbdfa4d5?w=400&q=80',
+        },
+        {
+          title: 'A Hero Who Is Good At Everything',
+          url: 'https://mangaread.org/manga/a-hero-who-is-good-at-everything/',
+          coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+        },
+        {
+          title: 'Monster Eater',
+          url: 'https://mangaread.org/manga/monster-eater/',
+          coverUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&q=80',
+        },
+        {
+          title: 'Hiding Out in an Apocalypse',
+          url: 'https://mangaread.org/manga/hiding-out-in-an-apocalypse/',
+          coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+        }
+      ];
+      setLatestUpdates(mockLatest);
+      setLoadingLatest(false);
+      return;
+    }
+
+    try {
+      const { fetchLatestUpdatesReal } = require('@/utils/scraper');
+      const results = await fetchLatestUpdatesReal(activeSource);
+      setLatestUpdates(results);
+    } catch (e: any) {
+      console.error('Erro ao buscar últimos lançamentos:', e);
+    } finally {
+      setLoadingLatest(false);
+    }
+  };
+
   // Clean intervals on unmount
   useEffect(() => {
     return () => {
@@ -778,6 +840,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         searching,
         searchManga,
         clearSearchResults,
+        latestUpdates,
+        loadingLatest,
+        fetchLatestUpdates,
       }}>
       {children}
     </MangaContext.Provider>
