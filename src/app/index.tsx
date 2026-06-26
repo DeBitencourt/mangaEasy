@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   TextInput,
   Pressable,
   ActivityIndicator,
   FlatList,
+  Animated,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -36,12 +37,41 @@ export default function HomeScreen() {
     clearSearchResults,
     latestUpdates,
     loadingLatest,
+    loadingMore,
     fetchLatestUpdates,
+    fetchMoreLatestUpdates,
   } = useManga();
 
   const [searchInput, setSearchInput] = useState('');
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [showSourceSelector, setShowSourceSelector] = useState(false);
+
+  // Scroll-to-top button
+  const flatListRef = useRef<FlatList>(null);
+  const scrollTopOpacity = useRef(new Animated.Value(0)).current;
+  const scrollTopScale = useRef(new Animated.Value(0.8)).current;
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  const handleScroll = (event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    const shouldShow = y > 300;
+    if (shouldShow && !showScrollTop) {
+      setShowScrollTop(true);
+      Animated.parallel([
+        Animated.timing(scrollTopOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+        Animated.spring(scrollTopScale, { toValue: 1, useNativeDriver: true }),
+      ]).start();
+    } else if (!shouldShow && showScrollTop) {
+      Animated.parallel([
+        Animated.timing(scrollTopOpacity, { toValue: 0, duration: 150, useNativeDriver: true }),
+        Animated.timing(scrollTopScale, { toValue: 0.8, duration: 150, useNativeDriver: true }),
+      ]).start(() => setShowScrollTop(false));
+    }
+  };
+
+  const scrollToTop = () => {
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  };
 
   // Info message state
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | null }>({
@@ -189,10 +219,28 @@ export default function HomeScreen() {
             </View>
           ) : (
             <FlatList
+              ref={flatListRef}
               data={searchInput.trim().length > 0 ? searchResults : latestUpdates}
               keyExtractor={(item) => item.url}
               numColumns={1}
               showsVerticalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              onEndReached={() => {
+                // Only paginate latest updates, not search results
+                if (searchInput.trim().length === 0 && !loadingMore && !loadingLatest) {
+                  fetchMoreLatestUpdates();
+                }
+              }}
+              onEndReachedThreshold={0.4}
+              ListFooterComponent={
+                loadingMore ? (
+                  <View style={{ paddingVertical: 20, alignItems: 'center', gap: 8 }}>
+                    <ActivityIndicator size="small" color={theme.accent} />
+                    <ThemedText type="code" themeColor="textSecondary">Carregando mais...</ThemedText>
+                  </View>
+                ) : null
+              }
               ListHeaderComponent={
                 <View style={[styles.headerContainer, { borderBottomColor: theme.backgroundSelected }]}>
                   <View style={[styles.headerMarker, { backgroundColor: theme.accent }]} />
@@ -297,6 +345,41 @@ export default function HomeScreen() {
         onClose={() => setIsDetailsModalOpen(false)}
         onShowToast={showStatus}
       />
+
+      {/* Floating Scroll-to-Top Button */}
+      {showScrollTop && (
+        <Animated.View
+          style={{
+            position: 'absolute',
+            bottom: BottomTabInset + 20,
+            right: 20,
+            opacity: scrollTopOpacity,
+            transform: [{ scale: scrollTopScale }],
+            zIndex: 100,
+          }}
+          pointerEvents="box-none"
+        >
+          <Pressable
+            onPress={scrollToTop}
+            style={({ pressed }) => ({
+              width: 46,
+              height: 46,
+              borderRadius: 23,
+              backgroundColor: theme.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.85 : 1,
+              shadowColor: theme.accent,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.5,
+              shadowRadius: 8,
+              elevation: 8,
+            })}
+          >
+            <SymbolView name="arrow.up" size={18} tintColor="#000000" />
+          </Pressable>
+        </Animated.View>
+      )}
     </ThemedView>
   );
 }

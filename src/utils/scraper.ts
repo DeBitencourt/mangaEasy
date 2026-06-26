@@ -6,6 +6,7 @@ export interface ScrapedManga {
   synopsis: string;
   chapters: string[];
   chapterUrls: Record<string, string>;
+  mangaType?: string;
 }
 
 const DEFAULT_HEADERS = {
@@ -283,12 +284,36 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
     }
   }
 
+  // 5. Extract Type (Manga, Manhwa, Manhua)
+  let mangaType = 'Manga';
+  const contentItems = root.querySelectorAll('.post-content_item');
+  for (const item of contentItems) {
+    const heading = item.querySelector('.summary-heading')?.textContent?.trim().toLowerCase();
+    if (heading && (heading.includes('type') || heading.includes('tipo'))) {
+      const value = item.querySelector('.summary-content')?.textContent?.trim();
+      if (value) {
+        mangaType = value.replace(/\s+/g, ' ').trim();
+        break;
+      }
+    }
+  }
+
+  // Fallback: check links containing /manga-type/ in href
+  if (mangaType.toLowerCase() === 'manga') {
+    const typeLink = root.querySelector('a[href*="/manga-type/"]');
+    if (typeLink) {
+      const val = typeLink.textContent?.trim();
+      if (val) mangaType = val;
+    }
+  }
+
   return {
     title,
     coverUrl,
     synopsis,
     chapters: titles,
     chapterUrls: urls,
+    mangaType,
   };
 }
 
@@ -500,9 +525,41 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
 /**
  * Fetches latest updates from the source homepage
  */
-export async function fetchLatestUpdatesReal(source: string): Promise<SearchResult[]> {
+export async function fetchLatestUpdatesReal(source: string, page: number = 1): Promise<SearchResult[]> {
+  // --- Asura Scans (REST API) ---
+  if (source.includes('asura')) {
+    try {
+      const apiUrl = `https://api.asurascans.com/series?page=${page}&page_size=20&ordering=-last_chapter_at`;
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Accept': 'application/json',
+          'Origin': 'https://asurascans.com',
+          'Referer': 'https://asurascans.com/',
+          'User-Agent': DEFAULT_HEADERS['User-Agent'],
+        },
+      });
+      if (!response.ok) throw new Error(`Asura API error: ${response.status}`);
+      const json = await response.json();
+      const items: any[] = json.results || json.data || json || [];
+      return items.map((item: any) => ({
+        title: item.title || '',
+        url: `https://asurascans.com${item.public_url || item.source_url || `/comics/${item.slug}`}`,
+        coverUrl: item.cover_url || item.coverUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+        rating: item.rating !== undefined ? String(item.rating) : undefined,
+        chapters: item.last_chapter_at
+          ? [{ name: `Cap. ${item.chapter_count || '?'}`, date: new Date(item.last_chapter_at).toLocaleDateString('pt-BR') }]
+          : undefined,
+      }));
+    } catch (e) {
+      console.error('Asura API error:', e);
+      return [];
+    }
+  }
+
+  // --- MangaRead.org (HTML scraper) ---
   const origin = `https://www.mangaread.org`;
-  const html = await fetchHtml(origin);
+  const url = page === 1 ? origin : `${origin}/page/${page}/`;
+  const html = await fetchHtml(url);
   const root = parse(html);
   const results: SearchResult[] = [];
 

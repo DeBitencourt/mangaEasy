@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   Pressable,
   ScrollView,
+  TextInput,
   View,
   ActivityIndicator,
   Platform,
@@ -33,6 +34,7 @@ export default function LibraryScreen() {
     loadingLibrary,
     scanLibrary,
     deleteManga,
+    updateLastReadChapter,
   } = useManga();
 
   // Reader Modal State
@@ -48,6 +50,9 @@ export default function LibraryScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
 
+  // Library search
+  const [librarySearch, setLibrarySearch] = useState('');
+
   useFocusEffect(
     useCallback(() => {
       scanLibrary();
@@ -60,6 +65,8 @@ export default function LibraryScreen() {
   };
 
   const handleOpenReaderFromDetails = (mangaItem: HistoryItem, chapterFolder: string) => {
+    // Persist last read chapter
+    updateLastReadChapter(mangaItem.savePath, chapterFolder);
     setIsLocalDetailsOpen(false);
     setTimeout(() => {
       setSelectedManga(mangaItem);
@@ -124,53 +131,86 @@ export default function LibraryScreen() {
               </View>
             ) : (
               <>
-                {localLibrary.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => openLocalDetails(item)}
-                    style={({ pressed }) => [
-                      styles.historyCard,
-                      {
-                        backgroundColor: theme.backgroundElement,
-                        opacity: pressed ? 0.95 : 1,
-                      }
-                    ]}>
-                    <Image
-                      source={{ uri: item.coverUrl }}
-                      style={styles.historyImage}
-                      contentFit="cover"
+                {/* Search bar */}
+                {localLibrary.length > 0 && (
+                  <View style={[styles.searchBarRow, { backgroundColor: theme.backgroundElement }]}>
+                    <SymbolView name="magnifyingglass" size={13} tintColor={theme.textSecondary} />
+                    <TextInput
+                      value={librarySearch}
+                      onChangeText={setLibrarySearch}
+                      placeholder="Buscar na biblioteca..."
+                      placeholderTextColor={theme.textSecondary}
+                      style={[styles.searchBarInput, { color: theme.text }]}
                     />
-                    <View style={styles.historyInfo}>
-                      <ThemedText type="smallBold" numberOfLines={1}>
-                        {item.mangaTitle}
-                      </ThemedText>
-
-                      <View style={styles.historyFooter}>
-                        <ThemedText type="code" themeColor="textSecondary">
-                          {item.chaptersCount} cap. {item.chaptersCount === 1 ? 'baixado' : 'baixados'}
-                        </ThemedText>
-                      </View>
-                    </View>
-
-                    <View style={{ flexDirection: 'row', gap: Spacing.one }}>
-                      <Pressable
-                        onPress={() => confirmDelete(item)}
-                        style={({ pressed }) => [
-                          styles.historyReadBtn,
-                          {
-                            borderColor: '#f44336',
-                            shadowColor: '#f44336',
-                            backgroundColor: 'rgba(244, 67, 54, 0.05)',
-                            opacity: pressed ? 0.7 : 1,
-                          },
-                        ]}>
-                        <SymbolView name="trash" size={12} tintColor="#f44336" />
+                    {librarySearch.length > 0 && (
+                      <Pressable onPress={() => setLibrarySearch('')}>
+                        <SymbolView name="xmark.circle.fill" size={14} tintColor={theme.textSecondary} />
                       </Pressable>
-                    </View>
-                  </Pressable>
-                ))}
+                    )}
+                  </View>
+                )}
 
-                {/* Empty History State */}
+                {localLibrary
+                  .filter(item =>
+                    item.mangaTitle.toLowerCase().includes(librarySearch.toLowerCase())
+                  )
+                  .map((item) => (
+                    <Pressable
+                      key={item.id}
+                      onPress={() => openLocalDetails(item)}
+                      style={({ pressed }) => [
+                        styles.historyCard,
+                        {
+                          backgroundColor: theme.backgroundElement,
+                          opacity: pressed ? 0.95 : 1,
+                        }
+                      ]}>
+                      <Image
+                        source={{ uri: item.coverUrl }}
+                        style={styles.historyImage}
+                        contentFit="cover"
+                      />
+                      <View style={styles.historyInfo}>
+                        <ThemedText type="smallBold" numberOfLines={1}>
+                          {item.mangaTitle}
+                        </ThemedText>
+
+                        <View style={styles.historyFooter}>
+                          <ThemedText type="code" themeColor="textSecondary">
+                            {item.chaptersCount} cap. {item.chaptersCount === 1 ? 'baixado' : 'baixados'}
+                          </ThemedText>
+                        </View>
+                      </View>
+
+                      <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                        <Pressable
+                          onPress={() => confirmDelete(item)}
+                          style={({ pressed }) => [
+                            styles.historyReadBtn,
+                            {
+                              borderColor: '#f44336',
+                              shadowColor: '#f44336',
+                              backgroundColor: 'rgba(244, 67, 54, 0.05)',
+                              opacity: pressed ? 0.7 : 1,
+                            },
+                          ]}>
+                          <SymbolView name="trash" size={12} tintColor="#f44336" />
+                        </Pressable>
+                      </View>
+                    </Pressable>
+                  ))}
+
+                {/* No results from search */}
+                {localLibrary.length > 0 &&
+                  localLibrary.filter(item =>
+                    item.mangaTitle.toLowerCase().includes(librarySearch.toLowerCase())
+                  ).length === 0 && (
+                    <View style={{ padding: Spacing.three, alignItems: 'center' }}>
+                      <ThemedText type="small" themeColor="textSecondary">Nenhum resultado encontrado.</ThemedText>
+                    </View>
+                  )}
+
+                {/* Empty Library State */}
                 {localLibrary.length === 0 && (
                   <ThemedView type="backgroundElement" style={styles.emptyState}>
                     <SymbolView name="square.and.arrow.down" size={32} tintColor={theme.textSecondary} />
@@ -196,6 +236,10 @@ export default function LibraryScreen() {
         onClose={() => {
           setIsReaderOpen(false);
           setInitialChapter(null);
+          // Return to manga details instead of the library screen
+          setTimeout(() => {
+            if (selectedManga) setIsLocalDetailsOpen(true);
+          }, 300);
         }}
         manga={selectedManga}
         initialChapter={initialChapter}

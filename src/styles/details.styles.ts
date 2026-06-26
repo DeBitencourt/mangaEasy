@@ -198,4 +198,70 @@ export const createDetailsStyles = (theme: any) => StyleSheet.create({
     color: '#ffffff',
     fontWeight: 'bold',
   },
+
+  // styles teste dropdown detalhes ------------------------
+  container: {
+    padding: 20,
+    zIndex: 1, // Importante para o dropdown ficar por cima de outros itens
+  },
+
+  label: {
+    fontSize: 16,
+    marginBottom: 8,
+    color: '#333',
+  },
+
+  dropdownContainer: {
+    position: 'relative' // Mantém o menu ancorado a este container
+  },
+
+  botaoPrincipal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#fff'
+  },
+
+  textoBotao: {
+    fontSize: 16,
+    color: '#333'
+  },
+
+  menuSuspanso: {
+    position: 'absolute',
+    top: 55, // Distância do topo para não cobrir o botão principal
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    elevation: 5, // Sombra no Android
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    zIndex: 1000 // Garante que o menu fique por cima de tudo
+  },
+
+  itemMenu: {
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee'
+  },
+
+  textoItem: {
+    fontSize: 16,
+    color: '#555'
+  },
+
+  textoItemSelecionado: {
+    color: '#007AFF', // Cor azul para mostrar qual está ativo
+    fontWeight: 'bold'
+  }
+
 });

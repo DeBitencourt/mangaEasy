@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   Pressable,
   ScrollView,
+  TextInput,
   View,
   ActivityIndicator,
 } from 'react-native';
@@ -35,6 +36,7 @@ export default function DownloadsScreen() {
   } = useManga();
 
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [historySearch, setHistorySearch] = useState('');
 
   const toggleLogExpand = (id: string) => {
     setExpandedLogId((prev) => (prev === id ? null : id));
@@ -219,36 +221,74 @@ export default function DownloadsScreen() {
               </ThemedText>
             </View>
 
-            {downloadHistory.map((item) => (
-              <ThemedView key={item.id} type="backgroundElement" style={libStyles.historyCard}>
-                <Image
-                  source={{ uri: item.coverUrl }}
-                  style={libStyles.historyImage}
-                  contentFit="cover"
+            {/* Search bar */}
+            {downloadHistory.length > 0 && (
+              <View style={[libStyles.searchBarRow, { backgroundColor: theme.backgroundElement }]}>
+                <SymbolView name="magnifyingglass" size={13} tintColor={theme.textSecondary} />
+                <TextInput
+                  value={historySearch}
+                  onChangeText={setHistorySearch}
+                  placeholder="Buscar no histórico..."
+                  placeholderTextColor={theme.textSecondary}
+                  style={[libStyles.searchBarInput, { color: theme.text }]}
                 />
-                <View style={libStyles.historyInfo}>
-                  <ThemedText type="smallBold" numberOfLines={1}>
-                    {item.mangaTitle}
-                  </ThemedText>
-                  
-                  <View style={libStyles.historyMetaRow}>
-                    <SymbolView name="folder.fill" size={10} tintColor="#FFA000" />
-                    <ThemedText type="code" themeColor="textSecondary" style={libStyles.historyPath} numberOfLines={1}>
-                      {item.savePath}
-                    </ThemedText>
-                  </View>
+                {historySearch.length > 0 && (
+                  <Pressable onPress={() => setHistorySearch('')}>
+                    <SymbolView name="xmark.circle.fill" size={14} tintColor={theme.textSecondary} />
+                  </Pressable>
+                )}
+              </View>
+            )}
 
-                  <View style={libStyles.historyFooter}>
-                    <ThemedText type="code" themeColor="textSecondary">
-                      {item.chaptersCount} cap. • {item.source}
-                    </ThemedText>
-                    <ThemedText type="code" themeColor="textSecondary">
-                      {item.downloadDate.split(',')[0]}
-                    </ThemedText>
+            {/* History list with max-height scroll */}
+            <ScrollView
+              nestedScrollEnabled
+              style={libStyles.historyScrollContainer}
+              showsVerticalScrollIndicator={true}>
+              {downloadHistory
+                .filter(item =>
+                  item.mangaTitle.toLowerCase().includes(historySearch.toLowerCase())
+                )
+                .map((item) => (
+                  <ThemedView key={item.id} type="backgroundElement" style={[libStyles.historyCard, { marginBottom: Spacing.one }]}>
+                    <Image
+                      source={{ uri: item.coverUrl }}
+                      style={libStyles.historyImage}
+                      contentFit="cover"
+                    />
+                    <View style={libStyles.historyInfo}>
+                      <ThemedText type="smallBold" numberOfLines={1}>
+                        {item.mangaTitle}
+                      </ThemedText>
+                      
+                      <View style={libStyles.historyMetaRow}>
+                        <SymbolView name="folder.fill" size={10} tintColor="#FFA000" />
+                        <ThemedText type="code" themeColor="textSecondary" style={libStyles.historyPath} numberOfLines={1}>
+                          {item.savePath}
+                        </ThemedText>
+                      </View>
+
+                      <View style={libStyles.historyFooter}>
+                        <ThemedText type="code" themeColor="textSecondary">
+                          {item.chaptersCount} cap. • {item.source}
+                        </ThemedText>
+                        <ThemedText type="code" themeColor="textSecondary">
+                          {item.downloadDate.split(',')[0]}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </ThemedView>
+                ))}
+
+              {downloadHistory.length > 0 &&
+                downloadHistory.filter(item =>
+                  item.mangaTitle.toLowerCase().includes(historySearch.toLowerCase())
+                ).length === 0 && (
+                  <View style={{ padding: Spacing.three, alignItems: 'center' }}>
+                    <ThemedText type="small" themeColor="textSecondary">Nenhum resultado encontrado.</ThemedText>
                   </View>
-                </View>
-              </ThemedView>
-            ))}
+                )}
+            </ScrollView>
 
             {downloadHistory.length === 0 && (
               <ThemedView type="backgroundElement" style={libStyles.emptyState}>

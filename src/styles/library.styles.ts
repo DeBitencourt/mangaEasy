@@ -213,4 +213,25 @@ export const createLibraryStyles = (theme: any) => StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  // Search bar shared between downloads history and library
+  searchBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    height: 40,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    gap: Spacing.one,
+  },
+  searchBarInput: {
+    flex: 1,
+    height: '100%',
+    fontSize: 13,
+  },
+  // Scrollable history container
+  historyScrollContainer: {
+    maxHeight: 400,
+    overflow: 'hidden',
+  },
 });

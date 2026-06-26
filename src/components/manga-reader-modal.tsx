@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Pressable,
@@ -8,8 +8,9 @@ import {
   View,
   Modal,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { SymbolView } from '@/components/ui/symbol-view';
 import { ThemedText } from '@/components/themed-text';
@@ -17,7 +18,13 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { HistoryItem } from '@/context/manga-context';
 import { useTheme } from '@/hooks/use-theme';
+import { useManga } from '@/context/manga-context';
 import * as FileSystem from 'expo-file-system/legacy';
+import { StatusBar } from 'expo-status-bar';
+
+import * as NavigationBar from 'expo-navigation-bar';
+
+
 
 // Import separated styles
 import { createSharedStyles } from '@/styles/shared.styles';
@@ -122,6 +129,7 @@ interface MangaReaderModalProps {
 
 export default function MangaReaderModal({ isOpen, onClose, manga, initialChapter = null }: MangaReaderModalProps) {
   const theme = useTheme();
+  const { updateLastReadChapter } = useManga();
   const sharedStyles = createSharedStyles(theme);
   const styles = createReaderStyles(theme);
 
@@ -133,6 +141,10 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const [showChapterSelector, setShowChapterSelector] = useState(false);
   const [viewMode, setViewMode] = useState<'manga' | 'webtoon'>('manga');
   const flatListRef = React.useRef<FlatList>(null);
+  const insets = useSafeAreaInsets();
+  const [showHeader, setShowHeader] = useState(true);
+  const lastOffsetY = useRef(0);
+  const headerOpacity = useRef(new Animated.Value(1)).current;
 
   // Scroll to top when chapter changes
   useEffect(() => {
@@ -148,7 +160,11 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   // Load chapters when modal opens
   useEffect(() => {
     if (isOpen && manga) {
-      const defaultMode = isManhwaHeuristic(manga.mangaTitle) ? 'webtoon' : 'manga';
+      const isManhwaType = manga.mangaType && (
+        manga.mangaType.toLowerCase() === 'manhwa' || 
+        manga.mangaType.toLowerCase() === 'manhua'
+      );
+      const defaultMode = (isManhwaType || isManhwaHeuristic(manga.mangaTitle)) ? 'webtoon' : 'manga';
       setViewMode(defaultMode);
       loadChaptersList(manga);
     } else {
@@ -159,6 +175,33 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
       setShowChapterSelector(false);
     }
   }, [isOpen, manga]);
+
+  // Toggle Android system navigation bar when reader is open
+  useEffect(() => {
+    if (Platform.OS === 'android' && NavigationBar) {
+      const hasSetVisibility = typeof NavigationBar.setVisibilityAsync === 'function';
+      const hasSetBehavior = typeof NavigationBar.setBehaviorAsync === 'function';
+
+      if (isOpen) {
+        if (hasSetVisibility) {
+          NavigationBar.setVisibilityAsync('hidden').catch((err: any) => console.warn(err));
+        }
+        if (hasSetBehavior) {
+          NavigationBar.setBehaviorAsync('overlay-swipe').catch((err: any) => console.warn(err));
+        }
+      } else {
+        if (hasSetVisibility) {
+          NavigationBar.setVisibilityAsync('visible').catch((err: any) => console.warn(err));
+        }
+      }
+
+      return () => {
+        if (hasSetVisibility) {
+          NavigationBar.setVisibilityAsync('visible').catch((err: any) => console.warn(err));
+        }
+      };
+    }
+  }, [isOpen]);
 
   const loadChaptersList = async (item: HistoryItem) => {
     setLoadingChapters(true);
@@ -325,73 +368,133 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const hasNextChapter = currentChapter ? localChapters.indexOf(currentChapter) > 0 : false;
   const hasPrevChapter = currentChapter ? localChapters.indexOf(currentChapter) < localChapters.length - 1 : false;
 
+  // Reset header visibility when opening/closing or changing chapter
+  useEffect(() => {
+    setShowHeader(true);
+    Animated.timing(headerOpacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+    lastOffsetY.current = 0;
+  }, [isOpen, currentChapter]);
+
+  // Persist last read chapter whenever it changes
+  useEffect(() => {
+    if (manga && currentChapter && !loadingPages) {
+      updateLastReadChapter(manga.savePath, currentChapter);
+    }
+  }, [currentChapter, loadingPages]);
+
+  // Animate header opacity in/out when showHeader state changes
+  useEffect(() => {
+    Animated.timing(headerOpacity, {
+      toValue: showHeader ? 1 : 0,
+      duration: 250,
+      useNativeDriver: true,
+    }).start();
+  }, [showHeader]);
+
+  const handleScroll = (event: any) => {
+    const currentOffsetY = event.nativeEvent.contentOffset.y;
+    const diff = currentOffsetY - lastOffsetY.current;
+
+    // Scroll down threshold of 10px and absolute Y offset > 80px to hide
+    if (diff > 10 && currentOffsetY > 80) {
+      if (showHeader) {
+        setShowHeader(false);
+      }
+    } 
+    // Scroll up threshold of -10px or back at the very top to show
+    else if (diff < -10 || currentOffsetY <= 20) {
+      if (!showHeader) {
+        setShowHeader(true);
+      }
+    }
+
+    lastOffsetY.current = currentOffsetY;
+  };
+
   return (
     <Modal
       visible={isOpen}
       animationType="slide"
+      statusBarTranslucent={true}
       onRequestClose={onClose}>
+      <StatusBar hidden={isOpen} style="light" />
       <ThemedView style={styles.readerContainer}>
-        {/* Reader Header */}
-        <SafeAreaView style={styles.readerHeader} edges={['top', 'left', 'right']}>
-          <View style={styles.readerHeaderContent}>
-            <Pressable onPress={onClose} style={styles.readerBackBtn}>
-              <SymbolView name="chevron.left" size={18} tintColor="#ffffff" />
-              <ThemedText type="smallBold" style={{ marginLeft: 4, color: '#ffffff' }}>Voltar</ThemedText>
-            </Pressable>
+        {/* Reader Header - fades out when scrolling down */}
+        <Animated.View
+          pointerEvents={showHeader ? 'auto' : 'none'}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            opacity: headerOpacity,
+          }}
+        >
+          <SafeAreaView style={styles.readerHeader} edges={['top', 'left', 'right']}>
+            <View style={styles.readerHeaderContent}>
+              <Pressable onPress={onClose} style={styles.readerBackBtn}>
+                <SymbolView name="chevron.left" size={18} tintColor="#ffffff" />
+                <ThemedText type="smallBold" style={{ marginLeft: 4, color: '#ffffff' }}>Voltar</ThemedText>
+              </Pressable>
 
-            <View style={styles.readerTitleBox}>
-              <ThemedText type="smallBold" style={styles.readerMangaTitle} numberOfLines={1}>
-                {manga?.mangaTitle}
-              </ThemedText>
-              <Pressable 
-                onPress={() => setShowChapterSelector(!showChapterSelector)}
-                style={styles.chapterDropdownBtn}>
-                <ThemedText type="code" style={{ color: theme.accent, fontWeight: 'bold' }}>
-                  {currentChapter || (loadingChapters ? 'Carregando lista...' : 'Sem Capítulos')}
+              <View style={styles.readerTitleBox}>
+                <ThemedText type="smallBold" style={styles.readerMangaTitle} numberOfLines={1}>
+                  {manga?.mangaTitle}
                 </ThemedText>
-                <SymbolView name="chevron.down" size={10} tintColor={theme.accent} style={{ marginLeft: 4 }} />
-              </Pressable>
-            </View>
+                <Pressable 
+                  onPress={() => setShowChapterSelector(!showChapterSelector)}
+                  style={styles.chapterDropdownBtn}>
+                  <ThemedText type="code" style={{ color: theme.accent, fontWeight: 'bold' }}>
+                    {currentChapter || (loadingChapters ? 'Carregando lista...' : 'Sem Capítulos')}
+                  </ThemedText>
+                  <SymbolView name="chevron.down" size={10} tintColor={theme.accent} style={{ marginLeft: 4 }} />
+                </Pressable>
+              </View>
 
-            {/* Navigation Controls */}
-            <View style={styles.readerNavControls}>
-              {/* View Mode Toggle */}
-              <Pressable 
-                onPress={() => setViewMode(prev => prev === 'manga' ? 'webtoon' : 'manga')}
-                style={[
-                  styles.readerNavBtn,
-                  {
-                    marginRight: 4,
-                    borderColor: viewMode === 'webtoon' ? theme.accent : 'transparent',
-                    borderWidth: viewMode === 'webtoon' ? 1 : 0,
-                    // Subtle neon shadow if active
-                    shadowColor: viewMode === 'webtoon' ? theme.accent : 'transparent',
-                    shadowOffset: { width: 0, height: 0 },
-                    shadowOpacity: 0.5,
-                    shadowRadius: 4,
-                  }
-                ]}>
-                <SymbolView 
-                  name={viewMode === 'webtoon' ? 'arrow.up.arrow.down.circle.fill' : 'book.fill'} 
-                  size={12} 
-                  tintColor={viewMode === 'webtoon' ? theme.accent : '#ffffff'} 
-                />
-              </Pressable>
-              <Pressable 
-                onPress={handlePrevChapter} 
-                disabled={!hasPrevChapter}
-                style={[styles.readerNavBtn, !hasPrevChapter && styles.readerNavBtnDisabled]}>
-                <SymbolView name="arrow.left" size={12} tintColor={hasPrevChapter ? '#ffffff' : '#666666'} />
-              </Pressable>
-              <Pressable 
-                onPress={handleNextChapter} 
-                disabled={!hasNextChapter}
-                style={[styles.readerNavBtn, !hasNextChapter && styles.readerNavBtnDisabled]}>
-                <SymbolView name="arrow.right" size={12} tintColor={hasNextChapter ? '#ffffff' : '#666666'} />
-              </Pressable>
+              {/* Navigation Controls */}
+              <View style={styles.readerNavControls}>
+                {/* View Mode Toggle */}
+                <Pressable 
+                  onPress={() => setViewMode(prev => prev === 'manga' ? 'webtoon' : 'manga')}
+                  style={[
+                    styles.readerNavBtn,
+                    {
+                      marginRight: 4,
+                      borderColor: viewMode === 'webtoon' ? theme.accent : 'transparent',
+                      borderWidth: viewMode === 'webtoon' ? 1 : 0,
+                      shadowColor: viewMode === 'webtoon' ? theme.accent : 'transparent',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.5,
+                      shadowRadius: 4,
+                    }
+                  ]}>
+                  <SymbolView 
+                    name={viewMode === 'webtoon' ? 'arrow.up.arrow.down.circle.fill' : 'book.fill'} 
+                    size={12} 
+                    tintColor={viewMode === 'webtoon' ? theme.accent : '#ffffff'} 
+                  />
+                </Pressable>
+                <Pressable 
+                  onPress={handlePrevChapter} 
+                  disabled={!hasPrevChapter}
+                  style={[styles.readerNavBtn, !hasPrevChapter && styles.readerNavBtnDisabled]}>
+                  <SymbolView name="arrow.left" size={12} tintColor={hasPrevChapter ? '#ffffff' : '#666666'} />
+                </Pressable>
+                <Pressable 
+                  onPress={handleNextChapter} 
+                  disabled={!hasNextChapter}
+                  style={[styles.readerNavBtn, !hasNextChapter && styles.readerNavBtnDisabled]}>
+                  <SymbolView name="arrow.right" size={12} tintColor={hasNextChapter ? '#ffffff' : '#666666'} />
+                </Pressable>
+              </View>
             </View>
-          </View>
-        </SafeAreaView>
+          </SafeAreaView>
+        </Animated.View>
 
         {/* Chapter Selector Dropdown Overlay */}
         {showChapterSelector && (
@@ -422,8 +525,8 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
           </View>
         )}
 
-        {/* Reader Scrollable Canvas */}
-        <View style={styles.readerCanvas}>
+        {/* Reader Scrollable Canvas - fills entire screen beneath translucent header */}
+        <View style={[styles.readerCanvas, StyleSheet.absoluteFillObject]}>
           {loadingPages ? (
             <View style={styles.readerLoading}>
               <ActivityIndicator size="large" color={theme.accent} />
@@ -437,6 +540,8 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
               data={chapterPages}
               keyExtractor={(item) => item}
               showsVerticalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
               renderItem={({ item, index }) => (
                 <ReaderPage
                   uri={item}

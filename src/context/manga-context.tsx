@@ -19,6 +19,9 @@ export interface ActiveDownload {
   speed: string;
   eta: string;
   logs: string[];
+  chapterUrls?: Record<string, string>;
+  mangaType?: string;
+  synopsis?: string;
 }
 
 export interface HistoryItem {
@@ -29,6 +32,9 @@ export interface HistoryItem {
   downloadDate: string;
   savePath: string;
   source: string;
+  mangaType?: string;
+  synopsis?: string;
+  lastReadChapter?: string;
 }
 
 export interface MangaDetail {
@@ -56,6 +62,7 @@ interface MangaContextType {
   loadingLibrary: boolean;
   scanLibrary: () => Promise<void>;
   deleteManga: (mangaTitle: string, savePath: string) => Promise<void>;
+  updateLastReadChapter: (savePath: string, chapterFolder: string) => Promise<void>;
   startDownload: (chapters: string[]) => void;
   pauseDownload: (id: string) => void;
   resumeDownload: (id: string) => void;
@@ -67,7 +74,9 @@ interface MangaContextType {
   clearSearchResults: () => void;
   latestUpdates: SearchResult[];
   loadingLatest: boolean;
+  loadingMore: boolean;
   fetchLatestUpdates: () => Promise<void>;
+  fetchMoreLatestUpdates: () => Promise<void>;
 }
 
 const MangaContext = createContext<MangaContextType | undefined>(undefined);
@@ -141,6 +150,8 @@ const loadHistory = async (): Promise<HistoryItem[]> => {
   return [];
 };
 
+const BackgroundService = Platform.OS !== 'web' ? require('react-native-background-actions').default : null;
+
 export function MangaProvider({ children }: { children: React.ReactNode }) {
   const [activeSource, setActiveSource] = useState('mangaread.org');
   const [currentSavePath, setCurrentSavePath] = useState('/Downloads/MangaEasy');
@@ -155,9 +166,18 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   const [searching, setSearching] = useState(false);
   const [latestUpdates, setLatestUpdates] = useState<SearchResult[]>([]);
   const [loadingLatest, setLoadingLatest] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [currentLatestPage, setCurrentLatestPage] = useState(1);
 
   const downloadIntervals = useRef<Record<string, NodeJS.Timeout>>({});
   const downloadStateRef = useRef<Record<string, 'downloading' | 'paused' | 'cancelled' | 'completed'>>({});
+  const activeDownloadLoopsRef = useRef<Record<string, boolean>>({});
+  const activeDownloadsRef = useRef<ActiveDownload[]>([]);
+
+  // Keep activeDownloadsRef synced with state for background tasks
+  useEffect(() => {
+    activeDownloadsRef.current = activeDownloads;
+  }, [activeDownloads]);
 
   // Load history at startup
   useEffect(() => {
@@ -167,6 +187,73 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     };
     initHistory();
   }, []);
+
+  // Manage background service lifecycle based on active downloads
+  useEffect(() => {
+    if (Platform.OS === 'web' || !BackgroundService) return;
+
+    const hasActive = activeDownloads.some(dl => dl.status === 'downloading');
+
+    const manageBackgroundService = async () => {
+      const isRunning = BackgroundService.isRunning();
+      
+      if (hasActive && !isRunning) {
+        try {
+          const firstDownloading = activeDownloads.find(dl => dl.status === 'downloading');
+          const options = {
+            taskName: 'MangaEasyDownload',
+            taskTitle: `Baixando ${firstDownloading?.mangaTitle || 'Mangá'}`,
+            taskDesc: 'Fazendo download de capítulos...',
+            taskIcon: {
+              name: 'ic_launcher',
+              type: 'mipmap',
+            },
+            color: '#d026ff',
+            linkingURI: 'mangaeasy://',
+            foregroundServiceType: ['dataSync'],
+            parameters: {
+              delay: 1500,
+            },
+          };
+          
+          await BackgroundService.start(async () => {
+            while (true) {
+              const active = activeDownloadsRef.current.filter(dl => dl.status === 'downloading');
+              const activeCount = active.length;
+              const currentDownload = active.length > 0 ? active[0] : null;
+
+              if (activeCount === 0) {
+                break;
+              }
+
+              if (currentDownload && BackgroundService.isRunning()) {
+                try {
+                  await BackgroundService.updateNotification({
+                    taskTitle: `Baixando ${currentDownload.mangaTitle}`,
+                    taskDesc: `${currentDownload.currentChapterTitle} - ${currentDownload.totalProgress}% concluído`,
+                  });
+                } catch (e) {
+                  // ignore notification update errors
+                }
+              }
+
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          }, options);
+        } catch (err) {
+          console.error('Erro ao iniciar serviço de download em segundo plano:', err);
+        }
+      } else if (!hasActive && isRunning) {
+        try {
+          await BackgroundService.stop();
+        } catch (err) {
+          console.error('Erro ao parar serviço de download em segundo plano:', err);
+        }
+      }
+    };
+
+    manageBackgroundService();
+  }, [activeDownloads]);
 
   const scanLibrary = useCallback(async () => {
     if (Platform.OS === 'web') {
@@ -262,6 +349,23 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
             chaptersCount = 1;
           }
 
+          // Read metadata.json if exists
+          let mangaType = 'Manga';
+          let synopsis = '';
+          let lastReadChapter: string | undefined;
+          const hasMetadata = mangaContents.includes('metadata.json');
+          if (hasMetadata) {
+            try {
+              const metaContent = await FileSystem.readAsStringAsync(`${itemPath}/metadata.json`);
+              const meta = JSON.parse(metaContent);
+              if (meta.mangaType) mangaType = meta.mangaType;
+              if (meta.synopsis) synopsis = meta.synopsis;
+              if (meta.lastReadChapter) lastReadChapter = meta.lastReadChapter;
+            } catch (err) {
+              console.warn('Erro ao ler metadados locais do item:', name, err);
+            }
+          }
+
           libraryItems.push({
             id: `local-${name}-${Date.now()}`,
             mangaTitle: name,
@@ -270,6 +374,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
             downloadDate: 'Local',
             savePath: itemPath,
             source: 'Local',
+            mangaType,
+            synopsis,
+            lastReadChapter,
           });
         }
       }
@@ -305,6 +412,29 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       alert('Erro ao excluir o mangá do armazenamento.');
     }
   }, [scanLibrary]);
+
+  const updateLastReadChapter = useCallback(async (savePath: string, chapterFolder: string) => {
+    if (Platform.OS === 'web') return;
+    try {
+      const metaPath = `${savePath}/metadata.json`;
+      let meta: Record<string, any> = {};
+      const metaInfo = await FileSystem.getInfoAsync(metaPath);
+      if (metaInfo.exists) {
+        const content = await FileSystem.readAsStringAsync(metaPath);
+        meta = JSON.parse(content);
+      }
+      meta.lastReadChapter = chapterFolder;
+      await FileSystem.writeAsStringAsync(metaPath, JSON.stringify(meta));
+      // Update in-memory localLibrary as well for instant UI update
+      setLocalLibrary(prev =>
+        prev.map(item =>
+          item.savePath === savePath ? { ...item, lastReadChapter: chapterFolder } : item
+        )
+      );
+    } catch (err) {
+      console.warn('Erro ao salvar último capítulo lido:', err);
+    }
+  }, []);
 
 
   // Fetch latest updates whenever activeSource changes
@@ -401,6 +531,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       speed: '0.0 MB/s',
       eta: '--:--',
       logs: [`[INFO] Iniciando download do mangá: ${mangaDetails.title}`, `[INFO] ${sortedChapters.length} capítulos selecionados para download.`],
+      chapterUrls: mangaDetails.chapterUrls,
+      mangaType: mangaDetails.mangaType || 'Manga',
+      synopsis: mangaDetails.synopsis || '',
     };
 
     setActiveDownloads((prev) => [newDownload, ...prev]);
@@ -408,7 +541,13 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     if (Platform.OS === 'web') {
       runDownloadSim(id, sortedChapters);
     } else {
-      runDownloadReal(id, sortedChapters);
+      runDownloadReal(id, sortedChapters, 0, 0, {
+        title: mangaDetails.title,
+        coverUrl: mangaDetails.coverUrl,
+        synopsis: mangaDetails.synopsis || '',
+        mangaType: mangaDetails.mangaType || 'Manga',
+        chapterUrls: mangaDetails.chapterUrls,
+      });
     }
   };
 
@@ -533,19 +672,20 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     downloadIntervals.current[id] = interval;
   };
 
-  const runDownloadReal = async (id: string, chapters: string[]) => {
-    let currentIdx = 0;
-    let pageIndex = 0;
-
-    setActiveDownloads((prev) => {
-      const dl = prev.find((d) => d.id === id);
-      if (dl) {
-        currentIdx = dl.currentChapterIndex;
-        pageIndex = dl.currentPage;
-      }
-      return prev;
-    });
-
+  const runDownloadReal = async (
+    id: string,
+    chapters: string[],
+    startChapterIdx = 0,
+    startPageIdx = 0,
+    metadata?: {
+      title: string;
+      coverUrl: string;
+      synopsis: string;
+      mangaType: string;
+      chapterUrls?: Record<string, string>;
+    }
+  ) => {
+    activeDownloadLoopsRef.current[id] = true;
     downloadStateRef.current[id] = 'downloading';
 
     const addLog = (text: string) => {
@@ -570,100 +710,78 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       );
     };
 
-    addLog(`[INFO] Analisando estrutura de capítulos...`);
-    
-    const sanitizeFolderName = (name: string) => {
-      return name.replace(/[\\/:*?"<>|]/g, '_').trim();
-    };
-    
-    const cleanMangaTitle = sanitizeFolderName(mangaDetails?.title || 'Manga');
-    const cleanSavePath = currentSavePath.startsWith('/') ? currentSavePath.slice(1) : currentSavePath;
-    const mangaDir = `${FileSystem.documentDirectory}${cleanSavePath}/${cleanMangaTitle}`;
-
-    // Create manga folder
     try {
-      await FileSystem.makeDirectoryAsync(mangaDir, { intermediates: true });
-    } catch (err: any) {
-      addLog(`[ERRO] Falha ao criar diretório do mangá: ${err.message}`);
-    }
+      let currentIdx = startChapterIdx;
+      let pageIndex = startPageIdx;
 
-    // Download cover image if it doesn't exist
-    let localCoverUri = '';
-    if (mangaDetails?.coverUrl) {
-      let ext = 'jpg';
-      if (mangaDetails.coverUrl.includes('.webp')) ext = 'webp';
-      else if (mangaDetails.coverUrl.includes('.png')) ext = 'png';
-      else if (mangaDetails.coverUrl.includes('.jpeg')) ext = 'jpeg';
-
-      const coverFileUri = `${mangaDir}/cover.${ext}`;
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(coverFileUri);
-        if (!fileInfo.exists) {
-          addLog(`[INFO] Baixando imagem de capa do mangá...`);
-          await FileSystem.downloadAsync(mangaDetails.coverUrl, coverFileUri);
-          addLog(`[SUCESSO] Capa do mangá salva localmente.`);
-        }
-        localCoverUri = coverFileUri;
-      } catch (err: any) {
-        addLog(`[AVISO] Não foi possível salvar a capa localmente: ${err.message}`);
-      }
-    }
-
-    const formatChapterFolder = (title: string) => {
-      const match = title.match(/\d+(\.\d+)?/);
-      if (match) {
-        return `cap-${match[0]}`;
-      }
-      return title.toLowerCase().replace(/\s+/g, '-').replace(/[\\/:*?"<>|]/g, '');
-    };
-
-    for (let cIdx = currentIdx; cIdx < chapters.length; cIdx++) {
-      if (downloadStateRef.current[id] === 'paused') {
-        addLog(`[INFO] Download pausado no capítulo: ${chapters[cIdx]}`);
-        return;
-      }
-      if (downloadStateRef.current[id] === 'cancelled') {
-        addLog(`[INFO] Download cancelado.`);
-        return;
-      }
-
-      const chapterTitle = chapters[cIdx];
-      const chapterUrl = mangaDetails?.chapterUrls?.[chapterTitle];
-
-      if (!chapterUrl) {
-        addLog(`[ERRO] URL não encontrada para o capítulo: ${chapterTitle}`);
-        updateProgress({ status: 'failed' });
-        return;
-      }
-
-      addLog(`[INFO] Buscando páginas para ${chapterTitle}...`);
+      addLog(`[INFO] Analisando estrutura de capítulos...`);
       
-      let imageUrls: string[] = [];
+      const sanitizeFolderName = (name: string) => {
+        return name.replace(/[\\/:*?"<>|]/g, '_').trim();
+      };
+      
+      const metaTitle = metadata?.title || mangaDetails?.title || 'Manga';
+      const metaCoverUrl = metadata?.coverUrl || mangaDetails?.coverUrl || '';
+      const metaSynopsis = metadata?.synopsis || mangaDetails?.synopsis || '';
+      const metaMangaType = metadata?.mangaType || mangaDetails?.mangaType || 'Manga';
+      const metaChapterUrls = metadata?.chapterUrls || mangaDetails?.chapterUrls || {};
+
+      const cleanMangaTitle = sanitizeFolderName(metaTitle);
+      const cleanSavePath = currentSavePath.startsWith('/') ? currentSavePath.slice(1) : currentSavePath;
+      const mangaDir = `${FileSystem.documentDirectory}${cleanSavePath}/${cleanMangaTitle}`;
+
+      // Create manga folder
       try {
-        imageUrls = await fetchChapterImagesReal(chapterUrl);
-        addLog(`[INFO] Encontradas ${imageUrls.length} páginas para ${chapterTitle}.`);
+        await FileSystem.makeDirectoryAsync(mangaDir, { intermediates: true });
+        
+        // Save metadata.json
+        const localMeta = {
+          title: metaTitle,
+          coverUrl: metaCoverUrl,
+          synopsis: metaSynopsis,
+          mangaType: metaMangaType,
+        };
+        await FileSystem.writeAsStringAsync(
+          `${mangaDir}/metadata.json`,
+          JSON.stringify(localMeta, null, 2)
+        );
       } catch (err: any) {
-        addLog(`[ERRO] Falha ao obter páginas do capítulo ${chapterTitle}: ${err.message || err}`);
-        updateProgress({ status: 'failed' });
-        return;
+        addLog(`[ERRO] Falha ao criar diretório/salvar metadados do mangá: ${err.message}`);
       }
 
-      const formattedChapterFolder = formatChapterFolder(chapterTitle);
-      const targetDir = `${mangaDir}/${formattedChapterFolder}`;
+      // Download cover image if it doesn't exist
+      let localCoverUri = '';
+      if (metaCoverUrl) {
+        let ext = 'jpg';
+        if (metaCoverUrl.includes('.webp')) ext = 'webp';
+        else if (metaCoverUrl.includes('.png')) ext = 'png';
+        else if (metaCoverUrl.includes('.jpeg')) ext = 'jpeg';
 
-      try {
-        await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
-      } catch (err: any) {
-        addLog(`[ERRO] Falha ao criar diretório local: ${err.message}`);
-        updateProgress({ status: 'failed' });
-        return;
+        const coverFileUri = `${mangaDir}/cover.${ext}`;
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(coverFileUri);
+          if (!fileInfo.exists) {
+            addLog(`[INFO] Baixando imagem de capa do mangá...`);
+            await FileSystem.downloadAsync(metaCoverUrl, coverFileUri);
+            addLog(`[SUCESSO] Capa do mangá salva localmente.`);
+          }
+          localCoverUri = coverFileUri;
+        } catch (err: any) {
+          addLog(`[AVISO] Não foi possível salvar a capa localmente: ${err.message}`);
+        }
       }
 
-      const startPage = cIdx === currentIdx ? pageIndex : 0;
-      for (let pIdx = startPage; pIdx < imageUrls.length; pIdx++) {
+      const formatChapterFolder = (title: string) => {
+        const match = title.match(/\d+(\.\d+)?/);
+        if (match) {
+          return `cap-${match[0]}`;
+        }
+        return title.toLowerCase().replace(/\s+/g, '-').replace(/[\\/:*?"<>|]/g, '');
+      };
+
+      for (let cIdx = currentIdx; cIdx < chapters.length; cIdx++) {
         if (downloadStateRef.current[id] === 'paused') {
-          addLog(`[INFO] Download pausado na página ${pIdx + 1}`);
-          updateProgress({ currentPage: pIdx, currentChapterIndex: cIdx, currentChapterTitle: chapterTitle });
+          addLog(`[INFO] Download pausado no capítulo: ${chapters[cIdx]}`);
           return;
         }
         if (downloadStateRef.current[id] === 'cancelled') {
@@ -671,115 +789,169 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        const imgUrl = imageUrls[pIdx];
-        let ext = 'jpg';
-        if (imgUrl.includes('.webp')) ext = 'webp';
-        else if (imgUrl.includes('.png')) ext = 'png';
-        else if (imgUrl.includes('.jpeg')) ext = 'jpeg';
+        const chapterTitle = chapters[cIdx];
+        const chapterUrl = metaChapterUrls[chapterTitle];
 
-        const fileName = `${pIdx + 1}.${ext}`;
-        const fileUri = `${targetDir}/${fileName}`;
-
-        const startTime = Date.now();
-        try {
-          addLog(`[DOWNLOAD] Baixando ${chapterTitle}: página ${pIdx + 1} de ${imageUrls.length}`);
-          
-          await FileSystem.downloadAsync(imgUrl, fileUri, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-              'Referer': chapterUrl,
-            },
-          });
-
-          const endTime = Date.now();
-          const durationSec = (endTime - startTime) / 1000;
-          const speedMB = (0.25 / Math.max(0.1, durationSec)).toFixed(1); // estimating avg size is 250KB
-
-          const overallPct = Math.round(((cIdx + (pIdx + 1) / imageUrls.length) / chapters.length) * 100);
-          const pagePct = Math.round(((pIdx + 1) / imageUrls.length) * 100);
-
-          const remainingChapters = chapters.length - cIdx - 1;
-          const remainingPages = (remainingChapters * 20) + (imageUrls.length - pIdx - 1);
-          const secondsRemaining = Math.max(1, Math.round(remainingPages * Math.max(0.2, durationSec)));
-          const formattedEta = secondsRemaining >= 60 
-            ? `${Math.floor(secondsRemaining / 60)}m ${secondsRemaining % 60}s`
-            : `${secondsRemaining}s`;
-
-          updateProgress({
-            currentChapterIndex: cIdx,
-            currentChapterTitle: chapterTitle,
-            chapterProgress: pagePct,
-            currentPage: pIdx + 1,
-            totalPages: imageUrls.length,
-            totalProgress: Math.min(overallPct, 100),
-            speed: `${speedMB} MB/s`,
-            eta: formattedEta,
-          });
-        } catch (err: any) {
-          addLog(`[ERRO] Falha ao baixar página ${pIdx + 1}: ${err.message || err}`);
+        if (!chapterUrl) {
+          addLog(`[ERRO] URL não encontrada para o capítulo: ${chapterTitle}`);
           updateProgress({ status: 'failed' });
           return;
         }
+
+        addLog(`[INFO] Buscando páginas para ${chapterTitle}...`);
+        
+        let imageUrls: string[] = [];
+        try {
+          imageUrls = await fetchChapterImagesReal(chapterUrl);
+          addLog(`[INFO] Encontradas ${imageUrls.length} páginas para ${chapterTitle}.`);
+        } catch (err: any) {
+          if (downloadStateRef.current[id] === 'paused' || downloadStateRef.current[id] === 'cancelled') {
+            return;
+          }
+          addLog(`[ERRO] Falha ao obter páginas do capítulo ${chapterTitle}: ${err.message || err}`);
+          updateProgress({ status: 'failed' });
+          return;
+        }
+
+        const formattedChapterFolder = formatChapterFolder(chapterTitle);
+        const targetDir = `${mangaDir}/${formattedChapterFolder}`;
+
+        try {
+          await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
+        } catch (err: any) {
+          addLog(`[ERRO] Falha ao criar diretório local: ${err.message}`);
+          updateProgress({ status: 'failed' });
+          return;
+        }
+
+        const startPage = cIdx === currentIdx ? pageIndex : 0;
+        for (let pIdx = startPage; pIdx < imageUrls.length; pIdx++) {
+          if (downloadStateRef.current[id] === 'paused') {
+            addLog(`[INFO] Download pausado na página ${pIdx + 1}`);
+            updateProgress({ currentPage: pIdx, currentChapterIndex: cIdx, currentChapterTitle: chapterTitle });
+            return;
+          }
+          if (downloadStateRef.current[id] === 'cancelled') {
+            addLog(`[INFO] Download cancelado.`);
+            return;
+          }
+
+          const imgUrl = imageUrls[pIdx];
+          let ext = 'jpg';
+          if (imgUrl.includes('.webp')) ext = 'webp';
+          else if (imgUrl.includes('.png')) ext = 'png';
+          else if (imgUrl.includes('.jpeg')) ext = 'jpeg';
+
+          const fileName = `${pIdx + 1}.${ext}`;
+          const fileUri = `${targetDir}/${fileName}`;
+
+          const startTime = Date.now();
+          try {
+            addLog(`[DOWNLOAD] Baixando ${chapterTitle}: página ${pIdx + 1} de ${imageUrls.length}`);
+            
+            await FileSystem.downloadAsync(imgUrl, fileUri, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                'Referer': chapterUrl,
+              },
+            });
+
+            const endTime = Date.now();
+            const durationSec = (endTime - startTime) / 1000;
+            const speedMB = (0.25 / Math.max(0.1, durationSec)).toFixed(1); // estimating avg size is 250KB
+
+            const overallPct = Math.round(((cIdx + (pIdx + 1) / imageUrls.length) / chapters.length) * 100);
+            const pagePct = Math.round(((pIdx + 1) / imageUrls.length) * 100);
+
+            const remainingChapters = chapters.length - cIdx - 1;
+            const remainingPages = (remainingChapters * 20) + (imageUrls.length - pIdx - 1);
+            const secondsRemaining = Math.max(1, Math.round(remainingPages * Math.max(0.2, durationSec)));
+            const formattedEta = secondsRemaining >= 60 
+              ? `${Math.floor(secondsRemaining / 60)}m ${secondsRemaining % 60}s`
+              : `${secondsRemaining}s`;
+
+            updateProgress({
+              currentChapterIndex: cIdx,
+              currentChapterTitle: chapterTitle,
+              chapterProgress: pagePct,
+              currentPage: pIdx + 1,
+              totalPages: imageUrls.length,
+              totalProgress: Math.min(overallPct, 100),
+              speed: `${speedMB} MB/s`,
+              eta: formattedEta,
+            });
+          } catch (err: any) {
+            if (downloadStateRef.current[id] === 'paused' || downloadStateRef.current[id] === 'cancelled') {
+              return;
+            }
+            addLog(`[ERRO] Falha ao baixar página ${pIdx + 1}: ${err.message || err}`);
+            updateProgress({ status: 'failed' });
+            return;
+          }
+        }
+
+        addLog(`[SUCESSO] ${chapterTitle} salvo na pasta local.`);
+        // Reset pageIndex for subsequent chapters
+        pageIndex = 0;
       }
 
-      addLog(`[SUCESSO] ${chapterTitle} salvo na pasta local.`);
-      // Reset pageIndex for subsequent chapters
-      pageIndex = 0;
-    }
+      downloadStateRef.current[id] = 'completed';
+      updateProgress({ status: 'completed', speed: '0.0 MB/s', eta: '0s' });
+      addLog(`[SUCESSO] Todos os capítulos baixados com sucesso!`);
 
-    downloadStateRef.current[id] = 'completed';
-    updateProgress({ status: 'completed', speed: '0.0 MB/s', eta: '0s' });
-    addLog(`[SUCESSO] Todos os capítulos baixados com sucesso!`);
+      let finalMangaTitle = '';
+      let finalCoverUrl = '';
+      let finalChaptersCount = 0;
 
-    let finalMangaTitle = '';
-    let finalCoverUrl = '';
-    let finalChaptersCount = 0;
+      setActiveDownloads((prev) => {
+        const dl = prev.find((d) => d.id === id);
+        if (dl) {
+          finalMangaTitle = dl.mangaTitle;
+          finalCoverUrl = dl.coverUrl;
+          finalChaptersCount = dl.chaptersCount;
+        }
+        return prev;
+      });
 
-    setActiveDownloads((prev) => {
-      const dl = prev.find((d) => d.id === id);
-      if (dl) {
-        finalMangaTitle = dl.mangaTitle;
-        finalCoverUrl = dl.coverUrl;
-        finalChaptersCount = dl.chaptersCount;
-      }
-      return prev;
-    });
+      setTimeout(() => {
+        setDownloadHistory((hist) => {
+          const existingIdx = hist.findIndex(item => item.mangaTitle === finalMangaTitle);
+          let next = [...hist];
 
-    setTimeout(() => {
-      setDownloadHistory((hist) => {
-        const existingIdx = hist.findIndex(item => item.mangaTitle === finalMangaTitle);
-        let next = [...hist];
-
-        if (existingIdx !== -1) {
-          const existingItem = hist[existingIdx];
-          const updatedItem = {
-            ...existingItem,
-            coverUrl: localCoverUri || existingItem.coverUrl || finalCoverUrl,
-            chaptersCount: existingItem.chaptersCount + finalChaptersCount,
-            downloadDate: new Date().toLocaleString('pt-BR'),
-            savePath: mangaDir,
-          };
-          next.splice(existingIdx, 1);
-          next = [updatedItem, ...next];
-        } else {
-          next = [
-            {
-              id: `hist-${Date.now()}`,
-              mangaTitle: finalMangaTitle,
-              coverUrl: localCoverUri || finalCoverUrl,
-              chaptersCount: finalChaptersCount,
+          if (existingIdx !== -1) {
+            const existingItem = hist[existingIdx];
+            const updatedItem = {
+              ...existingItem,
+              coverUrl: localCoverUri || existingItem.coverUrl || finalCoverUrl,
+              chaptersCount: existingItem.chaptersCount + finalChaptersCount,
               downloadDate: new Date().toLocaleString('pt-BR'),
               savePath: mangaDir,
-              source: activeSource,
-            },
-            ...next,
-          ];
-        }
-        saveHistory(next);
-        return next;
-      });
-      setActiveDownloads((currDl) => currDl.filter((d) => d.id !== id));
-    }, 1000);
+            };
+            next.splice(existingIdx, 1);
+            next = [updatedItem, ...next];
+          } else {
+            next = [
+              {
+                id: `hist-${Date.now()}`,
+                mangaTitle: finalMangaTitle,
+                coverUrl: localCoverUri || finalCoverUrl,
+                chaptersCount: finalChaptersCount,
+                downloadDate: new Date().toLocaleString('pt-BR'),
+                savePath: mangaDir,
+                source: activeSource,
+              },
+              ...next,
+            ];
+          }
+          saveHistory(next);
+          return next;
+        });
+        setActiveDownloads((currDl) => currDl.filter((d) => d.id !== id));
+      }, 1000);
+
+    } finally {
+      activeDownloadLoopsRef.current[id] = false;
+    }
   };
 
   const pauseDownload = (id: string) => {
@@ -801,7 +973,21 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       downloadStateRef.current[id] = 'downloading';
 
       if (Platform.OS !== 'web') {
-        runDownloadReal(id, item.selectedChapters);
+        if (!activeDownloadLoopsRef.current[id]) {
+          runDownloadReal(
+            id,
+            item.selectedChapters,
+            item.currentChapterIndex,
+            item.currentPage,
+            {
+              title: item.mangaTitle,
+              coverUrl: item.coverUrl,
+              synopsis: item.synopsis || '',
+              mangaType: item.mangaType || 'Manga',
+              chapterUrls: item.chapterUrls,
+            }
+          );
+        }
         return updatedDownloads;
       }
 
@@ -1068,12 +1254,31 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const { fetchLatestUpdatesReal } = require('@/utils/scraper');
-      const results = await fetchLatestUpdatesReal(activeSource);
+      const results = await fetchLatestUpdatesReal(activeSource, 1);
       setLatestUpdates(results);
+      setCurrentLatestPage(1);
     } catch (e: any) {
       console.error('Erro ao buscar últimos lançamentos:', e);
     } finally {
       setLoadingLatest(false);
+    }
+  };
+
+  const fetchMoreLatestUpdates = async () => {
+    if (loadingMore || Platform.OS === 'web') return;
+    setLoadingMore(true);
+    try {
+      const nextPage = currentLatestPage + 1;
+      const { fetchLatestUpdatesReal } = require('@/utils/scraper');
+      const results = await fetchLatestUpdatesReal(activeSource, nextPage);
+      if (results.length > 0) {
+        setLatestUpdates(prev => [...prev, ...results]);
+        setCurrentLatestPage(nextPage);
+      }
+    } catch (e: any) {
+      console.error('Erro ao carregar mais:', e);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -1101,6 +1306,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         loadingLibrary,
         scanLibrary,
         deleteManga,
+        updateLastReadChapter,
         startDownload,
         pauseDownload,
         resumeDownload,
@@ -1112,7 +1318,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         clearSearchResults,
         latestUpdates,
         loadingLatest,
+        loadingMore,
         fetchLatestUpdates,
+        fetchMoreLatestUpdates,
       }}>
       {children}
     </MangaContext.Provider>

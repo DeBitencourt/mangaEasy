@@ -20,7 +20,8 @@ import { useTheme } from '@/hooks/use-theme';
 
 // Import separated styles
 import { createSharedStyles } from '@/styles/shared.styles';
-import { createDetailsStyles } from '@/styles/details.styles';
+import { createDetailsStyles } from '@/styles/details.styles';;
+import * as FileSystem from 'expo-file-system/legacy';
 
 interface MangaDetailsModalProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
     mangaDetails,
     loadingDetails,
     startDownload,
+    localLibrary,
   } = useManga();
 
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
@@ -59,7 +61,48 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
     }
   }, [isOpen]);
 
+  // Set of numeric chapter numbers that are already downloaded locally
+  const [downloadedNums, setDownloadedNums] = useState<Set<number>>(new Set());
+
+  // Scan the local folder to find which chapters are already downloaded
+  useEffect(() => {
+    const scan = async () => {
+      if (!mangaDetails || Platform.OS === 'web') {
+        setDownloadedNums(new Set());
+        return;
+      }
+      const localEntry = localLibrary.find(
+        (item) => item.mangaTitle.toLowerCase() === mangaDetails.title.toLowerCase()
+      );
+      if (!localEntry) {
+        setDownloadedNums(new Set());
+        return;
+      }
+      try {
+        const contents = await FileSystem.readDirectoryAsync(localEntry.savePath);
+        const nums = new Set<number>();
+        contents.forEach(name => {
+          // folder names are like "cap-10" or "cap-10.5"
+          const match = name.match(/(\d+(?:\.\d+)?)/);
+          if (match) nums.add(parseFloat(match[1]));
+        });
+        setDownloadedNums(nums);
+      } catch {
+        setDownloadedNums(new Set());
+      }
+    };
+    scan();
+  }, [mangaDetails, localLibrary]);
+
+  // Returns true if an online chapter name (e.g. "Capítulo 10") is already downloaded locally
+  const isDownloaded = (chapterName: string): boolean => {
+    const match = chapterName.match(/(\d+(?:\.\d+)?)/);
+    if (!match) return false;
+    return downloadedNums.has(parseFloat(match[1]));
+  };
+
   const toggleChapter = (chapter: string) => {
+    if (isDownloaded(chapter)) return;
     setSelectedChapters((prev) =>
       prev.includes(chapter) ? prev.filter((c) => c !== chapter) : [...prev, chapter]
     );
@@ -67,7 +110,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
 
   const handleSelectAll = () => {
     if (!mangaDetails) return;
-    setSelectedChapters(mangaDetails.chapters);
+    setSelectedChapters(mangaDetails.chapters.filter(ch => !isDownloaded(ch)));
   };
 
   const handleSelectNone = () => {
@@ -88,6 +131,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
     const max = Math.max(startNum, endNum);
 
     const matched = mangaDetails.chapters.filter((ch) => {
+      if (isDownloaded(ch)) return false;
       const match = ch.match(/\d+/);
       if (match) {
         const num = parseInt(match[0]);
@@ -291,26 +335,49 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
                   showsVerticalScrollIndicator={true}>
                   {displayedChapters.map((item, idx) => {
                     const isChecked = selectedChapters.includes(item);
+                    const alreadyDownloaded = isDownloaded(item);
                     return (
                       <Pressable
                         key={`${item}-${idx}`}
                         onPress={() => toggleChapter(item)}
-                        style={({ pressed }) => [
+                        disabled={alreadyDownloaded}
+                        style={[
                           styles.chapterRow,
                           {
-                            backgroundColor: isChecked ? theme.backgroundSelected : theme.background,
-                            borderColor: isChecked ? theme.accent : theme.backgroundSelected,
-                            opacity: pressed ? 0.8 : 1,
+                            backgroundColor: alreadyDownloaded
+                              ? 'rgba(76, 175, 80, 0.08)'
+                              : isChecked ? theme.backgroundSelected : theme.background,
+                            borderColor: alreadyDownloaded
+                              ? 'rgba(76, 175, 80, 0.3)'
+                              : isChecked ? theme.accent : theme.backgroundSelected,
                           },
                         ]}>
-                        <ThemedText type="small" themeColor={isChecked ? 'text' : 'textSecondary'}>
+                        <ThemedText
+                          type="small"
+                          style={{
+                            color: alreadyDownloaded ? '#4CAF50' : isChecked ? theme.text : theme.textSecondary,
+                            flex: 1,
+                          }}>
                           {item}
                         </ThemedText>
-                        <SymbolView
-                          name={isChecked ? 'checkmark.square.fill' : 'square'}
-                          size={16}
-                          tintColor={isChecked ? theme.accent : theme.textSecondary}
-                        />
+                        {alreadyDownloaded ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <ThemedText type="code" style={{ fontSize: 9, color: '#4CAF50' }}>
+                              Baixado
+                            </ThemedText>
+                            <SymbolView
+                              name="checkmark.circle.fill"
+                              size={16}
+                              tintColor="#4CAF50"
+                            />
+                          </View>
+                        ) : (
+                          <SymbolView
+                            name={isChecked ? 'checkmark.square.fill' : 'square'}
+                            size={16}
+                            tintColor={isChecked ? theme.accent : theme.textSecondary}
+                          />
+                        )}
                       </Pressable>
                     );
                   })}

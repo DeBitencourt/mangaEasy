@@ -12,7 +12,6 @@ export const createReaderStyles = (theme: any) => StyleSheet.create({
     backgroundColor: 'rgba(10, 5, 18, 0.95)', // Space purple overlay
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(208, 38, 255, 0.15)', // Neon separator line
-    zIndex: 10,
   },
   readerHeaderContent: {
     height: 52,

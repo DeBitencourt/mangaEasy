@@ -159,6 +159,27 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                   <ThemedText type="default" style={styles.detailTitle}>
                     {manga.mangaTitle}
                   </ThemedText>
+                  
+                  {/* Type Badge */}
+                  <View style={{
+                    alignSelf: 'flex-start',
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: 'rgba(208, 38, 255, 0.12)',
+                    borderColor: 'rgba(208, 38, 255, 0.3)',
+                    borderWidth: 1,
+                    marginVertical: 6,
+                    shadowColor: theme.accent,
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 2,
+                  }}>
+                    <ThemedText type="code" style={{ fontSize: 9, color: theme.accent, fontWeight: 'bold' }}>
+                      {manga.mangaType || 'Manga'}
+                    </ThemedText>
+                  </View>
+
                   <View style={styles.detailSourceRow}>
                     <SymbolView name="folder.fill" size={12} tintColor="#FFA000" />
                     <ThemedText type="code" themeColor="textSecondary" style={{ marginLeft: 4, fontSize: 10 }}>
@@ -170,13 +191,35 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
 
               {/* Synopsis / Offline block */}
               <ThemedView type="backgroundElement" style={styles.synopsisCard}>
-                <ThemedText type="smallBold" style={{ marginBottom: 4, color: theme.accent }}>
-                  Leitura Offline Disponível
+                <ThemedText type="smallBold" style={{ marginBottom: 6, color: theme.accent }}>
+                  {manga.synopsis ? "Sinopse" : "Leitura Offline Disponível"}
                 </ThemedText>
                 <ThemedText type="small" themeColor="textSecondary" style={styles.synopsisText}>
-                  Este mangá está salvo localmente no dispositivo. Você possui {localChapters.length} {localChapters.length === 1 ? 'capítulo baixado' : 'capítulos baixados'} para leitura offline sem consumo de dados. Clique em um capítulo para iniciar a leitura.
+                  {manga.synopsis || `Este mangá está salvo localmente no dispositivo. Você possui ${localChapters.length} ${localChapters.length === 1 ? 'capítulo baixado' : 'capítulos baixados'} para leitura offline sem consumo de dados. Clique em um capítulo para iniciar a leitura.`}
                 </ThemedText>
               </ThemedView>
+
+              {/* Continue Reading Button */}
+              {manga.lastReadChapter && (
+                <Pressable
+                  onPress={() => onOpenReader(manga, manga.lastReadChapter!)}
+                  style={({ pressed }) => [
+                    styles.downloadBtn,
+                    {
+                      backgroundColor: theme.accent,
+                      opacity: pressed ? 0.85 : 1,
+                    },
+                  ]}
+                >
+                  <SymbolView name="play.fill" size={14} tintColor="#000000" />
+                  <ThemedText type="smallBold" style={[styles.downloadBtnText, { color: '#000000' }]}>
+                    Continuar Lendo
+                  </ThemedText>
+                  <ThemedText type="code" style={{ color: 'rgba(0,0,0,0.6)', fontSize: 11 }}>
+                    {formatChapterNameForDisplay(manga.lastReadChapter)}
+                  </ThemedText>
+                </Pressable>
+              )}
 
               <View style={sharedStyles.divider} />
 
