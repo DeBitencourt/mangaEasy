@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { fetchMangaDetailsReal, fetchChapterImagesReal, normalizeMangaUrl, SearchResult } from '@/utils/scraper';
@@ -52,6 +52,10 @@ interface MangaContextType {
   clearDetails: () => void;
   activeDownloads: ActiveDownload[];
   downloadHistory: HistoryItem[];
+  localLibrary: HistoryItem[];
+  loadingLibrary: boolean;
+  scanLibrary: () => Promise<void>;
+  deleteManga: (mangaTitle: string, savePath: string) => Promise<void>;
   startDownload: (chapters: string[]) => void;
   pauseDownload: (id: string) => void;
   resumeDownload: (id: string) => void;
@@ -144,6 +148,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [activeDownloads, setActiveDownloads] = useState<ActiveDownload[]>([]);
   const [downloadHistory, setDownloadHistory] = useState<HistoryItem[]>([]);
+  const [deletedMangaWeb, setDeletedMangaWeb] = useState<string[]>([]);
+  const [localLibrary, setLocalLibrary] = useState<HistoryItem[]>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [latestUpdates, setLatestUpdates] = useState<SearchResult[]>([]);
@@ -160,6 +167,145 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     };
     initHistory();
   }, []);
+
+  const scanLibrary = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      // Group downloadHistory by mangaTitle on Web to simulate scanned folders
+      const grouped: Record<string, HistoryItem> = {};
+      downloadHistory.forEach((item) => {
+        const title = item.mangaTitle;
+        if (deletedMangaWeb.includes(title)) return;
+        if (!grouped[title]) {
+          grouped[title] = {
+            ...item,
+            id: `local-${title}`,
+            downloadDate: 'Local',
+          };
+        } else {
+          grouped[title].chaptersCount += item.chaptersCount;
+        }
+      });
+      setLocalLibrary(Object.values(grouped));
+      return;
+    }
+
+    setLoadingLibrary(true);
+    try {
+      const cleanSavePath = currentSavePath.startsWith('/') ? currentSavePath.slice(1) : currentSavePath;
+      const downloadsDir = `${FileSystem.documentDirectory}${cleanSavePath}`;
+
+      const dirInfo = await FileSystem.getInfoAsync(downloadsDir);
+      if (!dirInfo.exists) {
+        setLocalLibrary([]);
+        return;
+      }
+
+      const contents = await FileSystem.readDirectoryAsync(downloadsDir);
+      const libraryItems: HistoryItem[] = [];
+
+      for (const name of contents) {
+        if (name.startsWith('.')) continue;
+
+        const itemPath = `${downloadsDir}/${name}`;
+        const itemInfo = await FileSystem.getInfoAsync(itemPath);
+
+        if (itemInfo.isDirectory) {
+          const mangaContents = await FileSystem.readDirectoryAsync(itemPath);
+
+          // Find cover image
+          let coverUri = '';
+          const coverFile = mangaContents.find((f) => {
+            const lower = f.toLowerCase();
+            return (
+              lower.startsWith('cover.') &&
+              (lower.endsWith('.jpg') ||
+                lower.endsWith('.jpeg') ||
+                lower.endsWith('.png') ||
+                lower.endsWith('.webp'))
+            );
+          });
+
+          if (coverFile) {
+            coverUri = `${itemPath}/${coverFile}`;
+          }
+
+          // Count chapters
+          const chapterDirs = mangaContents.filter((f) => {
+            if (f.startsWith('.')) return false;
+            const lower = f.toLowerCase();
+            if (lower.startsWith('cover.')) return false;
+            if (
+              lower.endsWith('.jpg') ||
+              lower.endsWith('.jpeg') ||
+              lower.endsWith('.png') ||
+              lower.endsWith('.webp') ||
+              lower.endsWith('.json')
+            ) {
+              return false;
+            }
+            return true;
+          });
+
+          const hasDirectImages = mangaContents.some((f) => {
+            const lower = f.toLowerCase();
+            if (lower.startsWith('cover.')) return false;
+            return (
+              lower.endsWith('.jpg') ||
+              lower.endsWith('.jpeg') ||
+              lower.endsWith('.png') ||
+              lower.endsWith('.webp')
+            );
+          });
+
+          let chaptersCount = chapterDirs.length;
+          if (hasDirectImages && chaptersCount === 0) {
+            chaptersCount = 1;
+          }
+
+          libraryItems.push({
+            id: `local-${name}-${Date.now()}`,
+            mangaTitle: name,
+            coverUrl: coverUri || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+            chaptersCount: chaptersCount,
+            downloadDate: 'Local',
+            savePath: itemPath,
+            source: 'Local',
+          });
+        }
+      }
+
+      setLocalLibrary(libraryItems);
+    } catch (err) {
+      console.error('Erro ao escanear a biblioteca local:', err);
+    } finally {
+      setLoadingLibrary(false);
+    }
+  }, [downloadHistory, currentSavePath, deletedMangaWeb]);
+
+  // Re-scan library when history or save path changes
+  useEffect(() => {
+    scanLibrary();
+  }, [scanLibrary]);
+
+  const deleteManga = useCallback(async (mangaTitle: string, savePath: string) => {
+    if (Platform.OS === 'web') {
+      setDeletedMangaWeb((prev) => [...prev, mangaTitle]);
+      return;
+    }
+
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(savePath);
+      if (dirInfo.exists) {
+        await FileSystem.deleteAsync(savePath, { idempotent: true });
+      }
+
+      await scanLibrary();
+    } catch (err) {
+      console.error('Erro ao excluir mangá local:', err);
+      alert('Erro ao excluir o mangá do armazenamento.');
+    }
+  }, [scanLibrary]);
+
 
   // Fetch latest updates whenever activeSource changes
   useEffect(() => {
@@ -326,20 +472,36 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
             const targetMangaTitle = item.mangaTitle;
             const targetCoverUrl = item.coverUrl;
             const targetChaptersCount = item.chaptersCount;
+            const mangaDir = `${currentSavePath}/${targetMangaTitle}`;
             setTimeout(() => {
               setDownloadHistory((hist) => {
-                const next = [
-                  {
-                    id: `hist-${Date.now()}`,
-                    mangaTitle: targetMangaTitle,
-                    coverUrl: targetCoverUrl,
-                    chaptersCount: targetChaptersCount,
+                const existingIdx = hist.findIndex(h => h.mangaTitle === targetMangaTitle);
+                let next = [...hist];
+                if (existingIdx !== -1) {
+                  const existingItem = hist[existingIdx];
+                  const updatedItem = {
+                    ...existingItem,
+                    coverUrl: targetCoverUrl || existingItem.coverUrl,
+                    chaptersCount: existingItem.chaptersCount + targetChaptersCount,
                     downloadDate: new Date().toLocaleString('pt-BR'),
-                    savePath: `${currentSavePath}/${targetMangaTitle}`,
-                    source: activeSource,
-                  },
-                  ...hist,
-                ];
+                    savePath: mangaDir,
+                  };
+                  next.splice(existingIdx, 1);
+                  next = [updatedItem, ...next];
+                } else {
+                  next = [
+                    {
+                      id: `hist-${Date.now()}`,
+                      mangaTitle: targetMangaTitle,
+                      coverUrl: targetCoverUrl,
+                      chaptersCount: targetChaptersCount,
+                      downloadDate: new Date().toLocaleString('pt-BR'),
+                      savePath: mangaDir,
+                      source: activeSource,
+                    },
+                    ...next,
+                  ];
+                }
                 saveHistory(next);
                 return next;
               });
@@ -416,6 +578,44 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     
     const cleanMangaTitle = sanitizeFolderName(mangaDetails?.title || 'Manga');
     const cleanSavePath = currentSavePath.startsWith('/') ? currentSavePath.slice(1) : currentSavePath;
+    const mangaDir = `${FileSystem.documentDirectory}${cleanSavePath}/${cleanMangaTitle}`;
+
+    // Create manga folder
+    try {
+      await FileSystem.makeDirectoryAsync(mangaDir, { intermediates: true });
+    } catch (err: any) {
+      addLog(`[ERRO] Falha ao criar diretório do mangá: ${err.message}`);
+    }
+
+    // Download cover image if it doesn't exist
+    let localCoverUri = '';
+    if (mangaDetails?.coverUrl) {
+      let ext = 'jpg';
+      if (mangaDetails.coverUrl.includes('.webp')) ext = 'webp';
+      else if (mangaDetails.coverUrl.includes('.png')) ext = 'png';
+      else if (mangaDetails.coverUrl.includes('.jpeg')) ext = 'jpeg';
+
+      const coverFileUri = `${mangaDir}/cover.${ext}`;
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(coverFileUri);
+        if (!fileInfo.exists) {
+          addLog(`[INFO] Baixando imagem de capa do mangá...`);
+          await FileSystem.downloadAsync(mangaDetails.coverUrl, coverFileUri);
+          addLog(`[SUCESSO] Capa do mangá salva localmente.`);
+        }
+        localCoverUri = coverFileUri;
+      } catch (err: any) {
+        addLog(`[AVISO] Não foi possível salvar a capa localmente: ${err.message}`);
+      }
+    }
+
+    const formatChapterFolder = (title: string) => {
+      const match = title.match(/\d+(\.\d+)?/);
+      if (match) {
+        return `cap-${match[0]}`;
+      }
+      return title.toLowerCase().replace(/\s+/g, '-').replace(/[\\/:*?"<>|]/g, '');
+    };
 
     for (let cIdx = currentIdx; cIdx < chapters.length; cIdx++) {
       if (downloadStateRef.current[id] === 'paused') {
@@ -448,8 +648,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const cleanChapterTitle = sanitizeFolderName(chapterTitle);
-      const targetDir = `${FileSystem.documentDirectory}${cleanSavePath}/${cleanMangaTitle}/${cleanChapterTitle}`;
+      const formattedChapterFolder = formatChapterFolder(chapterTitle);
+      const targetDir = `${mangaDir}/${formattedChapterFolder}`;
 
       try {
         await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
@@ -547,18 +747,34 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
 
     setTimeout(() => {
       setDownloadHistory((hist) => {
-        const next = [
-          {
-            id: `hist-${Date.now()}`,
-            mangaTitle: finalMangaTitle,
-            coverUrl: finalCoverUrl,
-            chaptersCount: finalChaptersCount,
+        const existingIdx = hist.findIndex(item => item.mangaTitle === finalMangaTitle);
+        let next = [...hist];
+
+        if (existingIdx !== -1) {
+          const existingItem = hist[existingIdx];
+          const updatedItem = {
+            ...existingItem,
+            coverUrl: localCoverUri || existingItem.coverUrl || finalCoverUrl,
+            chaptersCount: existingItem.chaptersCount + finalChaptersCount,
             downloadDate: new Date().toLocaleString('pt-BR'),
-            savePath: `${FileSystem.documentDirectory}${cleanSavePath}/${cleanMangaTitle}`,
-            source: activeSource,
-          },
-          ...hist,
-        ];
+            savePath: mangaDir,
+          };
+          next.splice(existingIdx, 1);
+          next = [updatedItem, ...next];
+        } else {
+          next = [
+            {
+              id: `hist-${Date.now()}`,
+              mangaTitle: finalMangaTitle,
+              coverUrl: localCoverUri || finalCoverUrl,
+              chaptersCount: finalChaptersCount,
+              downloadDate: new Date().toLocaleString('pt-BR'),
+              savePath: mangaDir,
+              source: activeSource,
+            },
+            ...next,
+          ];
+        }
         saveHistory(next);
         return next;
       });
@@ -652,19 +868,39 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
               const targetMangaTitle = dlItem.mangaTitle;
               const targetCoverUrl = dlItem.coverUrl;
               const targetChaptersCount = dlItem.chaptersCount;
+              const mangaDir = `${currentSavePath}/${targetMangaTitle}`;
               setTimeout(() => {
-                setDownloadHistory((hist) => [
-                  {
-                    id: `hist-${Date.now()}`,
-                    mangaTitle: targetMangaTitle,
-                    coverUrl: targetCoverUrl,
-                    chaptersCount: targetChaptersCount,
-                    downloadDate: new Date().toLocaleString('pt-BR'),
-                    savePath: `${currentSavePath}/${targetMangaTitle}`,
-                    source: activeSource,
-                  },
-                  ...hist,
-                ]);
+                setDownloadHistory((hist) => {
+                  const existingIdx = hist.findIndex(h => h.mangaTitle === targetMangaTitle);
+                  let next = [...hist];
+                  if (existingIdx !== -1) {
+                    const existingItem = hist[existingIdx];
+                    const updatedItem = {
+                      ...existingItem,
+                      coverUrl: targetCoverUrl || existingItem.coverUrl,
+                      chaptersCount: existingItem.chaptersCount + targetChaptersCount,
+                      downloadDate: new Date().toLocaleString('pt-BR'),
+                      savePath: mangaDir,
+                    };
+                    next.splice(existingIdx, 1);
+                    next = [updatedItem, ...next];
+                  } else {
+                    next = [
+                      {
+                        id: `hist-${Date.now()}`,
+                        mangaTitle: targetMangaTitle,
+                        coverUrl: targetCoverUrl,
+                        chaptersCount: targetChaptersCount,
+                        downloadDate: new Date().toLocaleString('pt-BR'),
+                        savePath: mangaDir,
+                        source: activeSource,
+                      },
+                      ...next,
+                    ];
+                  }
+                  saveHistory(next);
+                  return next;
+                });
                 setActiveDownloads((currDl) => currDl.filter((d) => d.id !== id));
               }, 1000);
             }
@@ -765,34 +1001,64 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       const mockLatest = [
         {
+          title: 'My Golden Traits Can Evolve Infinitely',
+          url: 'https://mangaread.org/manga/my-golden-traits-can-evolve-infinitely/',
+          coverUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=400&q=80',
+          rating: '3.8',
+          chapters: [
+            { name: 'Chapter 8', date: '25 mins ago' },
+            { name: 'Chapter 7', date: '20.06.2026' }
+          ]
+        },
+        {
+          title: 'The Villainous General in a Musou Game: Breaking the...',
+          url: 'https://mangaread.org/manga/the-villainous-general-in-a-musou-game-breaking-the/',
+          coverUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&q=80',
+          rating: '4.4',
+          chapters: [
+            { name: 'Chapter 7.1', date: '27 mins ago' },
+            { name: 'Chapter 6.2', date: '27 mins ago' }
+          ]
+        },
+        {
           title: 'World-Saving Is a Skill',
           url: 'https://mangaread.org/manga/world-saving-is-a-skill/',
-          coverUrl: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=400&q=80',
+          coverUrl: 'https://images.unsplash.com/photo-1560169897-fc0cdbdfa4d5?w=400&q=80',
+          rating: '4.0',
+          chapters: [
+            { name: 'Chapter 15', date: '1 hour ago' },
+            { name: 'Chapter 14', date: '2 hours ago' }
+          ]
         },
         {
           title: 'Reveries of the Moonlight (2025)',
           url: 'https://mangaread.org/manga/reveries-of-the-moonlight-2025/',
-          coverUrl: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=400&q=80',
+          coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          rating: '4.2',
+          chapters: [
+            { name: 'Chapter 5', date: '1 day ago' },
+            { name: 'Chapter 4', date: '3 days ago' }
+          ]
         },
         {
           title: 'Gatekeeper of the Boundless Worlds',
           url: 'https://mangaread.org/manga/gatekeeper-of-the-boundless-worlds/',
-          coverUrl: 'https://images.unsplash.com/photo-1560169897-fc0cdbdfa4d5?w=400&q=80',
-        },
-        {
-          title: 'A Hero Who Is Good At Everything',
-          url: 'https://mangaread.org/manga/a-hero-who-is-good-at-everything/',
-          coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          coverUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&q=80',
+          rating: '4.7',
+          chapters: [
+            { name: 'Chapter 12', date: '2 days ago' },
+            { name: 'Chapter 11', date: '5 days ago' }
+          ]
         },
         {
           title: 'Monster Eater',
           url: 'https://mangaread.org/manga/monster-eater/',
-          coverUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&q=80',
-        },
-        {
-          title: 'Hiding Out in an Apocalypse',
-          url: 'https://mangaread.org/manga/hiding-out-in-an-apocalypse/',
           coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          rating: '3.9',
+          chapters: [
+            { name: 'Chapter 3', date: '3 days ago' },
+            { name: 'Chapter 2', date: '1 week ago' }
+          ]
         }
       ];
       setLatestUpdates(mockLatest);
@@ -831,6 +1097,10 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         clearDetails,
         activeDownloads,
         downloadHistory,
+        localLibrary,
+        loadingLibrary,
+        scanLibrary,
+        deleteManga,
         startDownload,
         pauseDownload,
         resumeDownload,

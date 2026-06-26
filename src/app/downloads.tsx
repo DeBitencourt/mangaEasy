@@ -1,29 +1,37 @@
 import React, { useState } from 'react';
 import {
-  StyleSheet,
   Pressable,
   ScrollView,
-  Platform,
   View,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { SymbolView } from '@/components/ui/symbol-view';
-
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useManga } from '@/context/manga-context';
 import { useTheme } from '@/hooks/use-theme';
 
+// Import separated styles
+import { createSharedStyles } from '@/styles/shared.styles';
+import { createDownloadsStyles } from '@/styles/downloads.styles';
+import { createLibraryStyles } from '@/styles/library.styles';
+
 export default function DownloadsScreen() {
   const theme = useTheme();
+  const sharedStyles = createSharedStyles(theme);
+  const styles = createDownloadsStyles(theme);
+  const libStyles = createLibraryStyles(theme);
+
   const {
     activeDownloads,
     pauseDownload,
     resumeDownload,
     cancelDownload,
+    downloadHistory,
+    clearHistory,
   } = useManga();
 
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
@@ -33,8 +41,8 @@ export default function DownloadsScreen() {
   };
 
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <ThemedView style={sharedStyles.container}>
+      <SafeAreaView style={sharedStyles.safeArea} edges={['top', 'left', 'right']}>
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
@@ -71,7 +79,7 @@ export default function DownloadsScreen() {
 
                       {/* Status Label */}
                       <View style={styles.statusRow}>
-                        <ThemedText type="code" style={[styles.statusText, { color: isPaused ? theme.textSecondary : '#8B5CF6' }]}>
+                        <ThemedText type="code" style={[styles.statusText, { color: isPaused ? theme.textSecondary : theme.accent }]}>
                           {isPaused ? 'PAUSADO' : 'BAIXANDO...'}
                         </ThemedText>
                         <ThemedText type="code" themeColor="textSecondary" style={styles.dotSeparator}>
@@ -91,7 +99,7 @@ export default function DownloadsScreen() {
                       {!isPaused && (
                         <View style={styles.statsRow}>
                           <View style={styles.statItem}>
-                            <SymbolView name="bolt.fill" size={10} tintColor="#8B5CF6" />
+                            <SymbolView name="bolt.fill" size={10} tintColor={theme.accent} />
                             <ThemedText type="code" style={styles.statValue}>
                               {dl.speed}
                             </ThemedText>
@@ -131,7 +139,7 @@ export default function DownloadsScreen() {
                       <View
                         style={[
                           styles.progressBarFill,
-                          { width: `${dl.totalProgress}%` },
+                          { width: `${dl.totalProgress}%`, backgroundColor: theme.accent },
                         ]}
                       />
                     </View>
@@ -170,7 +178,7 @@ export default function DownloadsScreen() {
                           {dl.logs.map((log, idx) => {
                             let logColor = theme.textSecondary;
                             if (log.includes('[SUCESSO]')) logColor = '#4CAF50';
-                            if (log.includes('[INFO]')) logColor = '#8B5CF6';
+                            if (log.includes('[INFO]')) logColor = theme.accent;
                             return (
                               <ThemedText
                                 key={idx}
@@ -202,166 +210,74 @@ export default function DownloadsScreen() {
             )}
           </View>
 
+          {/* History / Completed Downloads Section */}
+          <View style={[styles.sectionContainer, { marginTop: Spacing.four }]}>
+            <View style={libStyles.sectionHeader}>
+              <SymbolView name="clock.arrow.2.circlepath" size={16} tintColor={theme.accent} />
+              <ThemedText type="smallBold" style={libStyles.sectionTitle}>
+                Histórico de Downloads ({downloadHistory.length})
+              </ThemedText>
+            </View>
+
+            {downloadHistory.map((item) => (
+              <ThemedView key={item.id} type="backgroundElement" style={libStyles.historyCard}>
+                <Image
+                  source={{ uri: item.coverUrl }}
+                  style={libStyles.historyImage}
+                  contentFit="cover"
+                />
+                <View style={libStyles.historyInfo}>
+                  <ThemedText type="smallBold" numberOfLines={1}>
+                    {item.mangaTitle}
+                  </ThemedText>
+                  
+                  <View style={libStyles.historyMetaRow}>
+                    <SymbolView name="folder.fill" size={10} tintColor="#FFA000" />
+                    <ThemedText type="code" themeColor="textSecondary" style={libStyles.historyPath} numberOfLines={1}>
+                      {item.savePath}
+                    </ThemedText>
+                  </View>
+
+                  <View style={libStyles.historyFooter}>
+                    <ThemedText type="code" themeColor="textSecondary">
+                      {item.chaptersCount} cap. • {item.source}
+                    </ThemedText>
+                    <ThemedText type="code" themeColor="textSecondary">
+                      {item.downloadDate.split(',')[0]}
+                    </ThemedText>
+                  </View>
+                </View>
+              </ThemedView>
+            ))}
+
+            {downloadHistory.length === 0 && (
+              <ThemedView type="backgroundElement" style={libStyles.emptyState}>
+                <SymbolView name="clock" size={24} tintColor={theme.textSecondary} />
+                <ThemedText type="smallBold" themeColor="textSecondary" style={{ marginTop: Spacing.two }}>
+                  Nenhum histórico disponível.
+                </ThemedText>
+              </ThemedView>
+            )}
+
+            {/* Clear History Button */}
+            {downloadHistory.length > 0 && (
+              <Pressable
+                onPress={clearHistory}
+                style={({ pressed }) => [
+                  libStyles.clearBtn,
+                  { borderColor: theme.backgroundSelected, opacity: pressed ? 0.7 : 1 },
+                ]}>
+                <SymbolView name="trash" size={14} tintColor="#f44336" />
+                <ThemedText type="smallBold" style={libStyles.clearBtnText}>
+                  Limpar Histórico
+                </ThemedText>
+              </Pressable>
+            )}
+          </View>
+
           <View style={{ height: BottomTabInset + Spacing.five }} />
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.three,
-    gap: Spacing.four,
-    maxWidth: MaxContentWidth,
-    alignSelf: 'center',
-    width: '100%',
-  },
-  header: {
-    paddingVertical: Spacing.two,
-    gap: Spacing.half,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-  },
-  sectionContainer: {
-    gap: Spacing.two,
-  },
-  downloadCard: {
-    borderRadius: Spacing.three,
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  downloadMeta: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    alignItems: 'center',
-  },
-  cardImage: {
-    width: 60,
-    height: 85,
-    borderRadius: Spacing.one,
-    backgroundColor: '#333',
-  },
-  downloadInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  mangaTitle: {
-    fontSize: 15,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: 'bold',
-  },
-  dotSeparator: {
-    marginHorizontal: Spacing.one,
-    fontSize: 11,
-  },
-  progressDetail: {
-    fontSize: 12,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    marginTop: 2,
-  },
-  statItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  statValue: {
-    fontSize: 10,
-  },
-  cardActions: {
-    flexDirection: 'row',
-    gap: Spacing.one,
-  },
-  actionBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionBtnCancel: {
-    backgroundColor: 'rgba(244,67,54,0.1)',
-  },
-  progressSection: {
-    gap: Spacing.one,
-    marginTop: Spacing.one,
-  },
-  progressBarBg: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#8B5CF6',
-    borderRadius: 3,
-  },
-  progressPercentRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  logsContainer: {
-    marginTop: Spacing.one,
-  },
-  logsToggle: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: Spacing.one,
-  },
-  logsBox: {
-    borderRadius: Spacing.one,
-    height: 120,
-    marginTop: Spacing.one,
-    padding: Spacing.two,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  logsScroll: {
-    flex: 1,
-  },
-  logsScrollContent: {
-    gap: 2,
-  },
-  logLine: {
-    fontSize: 10,
-    lineHeight: 14,
-  },
-  emptyState: {
-    padding: Spacing.five,
-    borderRadius: Spacing.three,
-    alignItems: 'center',
-    justifyContent: 'center',
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    textAlign: 'center',
-    fontSize: 12,
-    marginTop: Spacing.one,
-    maxWidth: 280,
-  },
-});

@@ -45,7 +45,8 @@ const SYMBOL_MAP: Record<string, string> = {
   'arrow.right': '▶',
   'doc.text.fill': '📄',
   'questionmark.circle': '❓',
-  'star': '⭐',
+  'star.fill': '★',
+  'star': '☆',
   'circle': '○',
   'chevron_right': '▶',
 };

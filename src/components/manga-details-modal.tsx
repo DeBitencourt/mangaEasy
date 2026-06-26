@@ -1,0 +1,347 @@
+import React, { useState, useEffect } from 'react';
+import {
+  StyleSheet,
+  TextInput,
+  Pressable,
+  ScrollView,
+  ActivityIndicator,
+  Modal,
+  Platform,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import { SymbolView } from '@/components/ui/symbol-view';
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
+import { Spacing } from '@/constants/theme';
+import { useManga } from '@/context/manga-context';
+import { useTheme } from '@/hooks/use-theme';
+
+// Import separated styles
+import { createSharedStyles } from '@/styles/shared.styles';
+import { createDetailsStyles } from '@/styles/details.styles';
+
+interface MangaDetailsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onShowToast: (text: string, type: 'success' | 'error') => void;
+}
+
+export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: MangaDetailsModalProps) {
+  const theme = useTheme();
+  const sharedStyles = createSharedStyles(theme);
+  const styles = createDetailsStyles(theme);
+
+  const {
+    mangaDetails,
+    loadingDetails,
+    startDownload,
+  } = useManga();
+
+  const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
+  const [searchChapter, setSearchChapter] = useState('');
+  const [sortAscending, setSortAscending] = useState(false);
+
+  // Range selector state
+  const [isRangeActive, setIsRangeActive] = useState(false);
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+
+  // Clear selections when modal opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedChapters([]);
+      setIsRangeActive(false);
+      setSearchChapter('');
+      setRangeStart('');
+      setRangeEnd('');
+    }
+  }, [isOpen]);
+
+  const toggleChapter = (chapter: string) => {
+    setSelectedChapters((prev) =>
+      prev.includes(chapter) ? prev.filter((c) => c !== chapter) : [...prev, chapter]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (!mangaDetails) return;
+    setSelectedChapters(mangaDetails.chapters);
+  };
+
+  const handleSelectNone = () => {
+    setSelectedChapters([]);
+  };
+
+  const applyRangeSelection = () => {
+    if (!mangaDetails) return;
+    const startNum = parseInt(rangeStart);
+    const endNum = parseInt(rangeEnd);
+
+    if (isNaN(startNum) || isNaN(endNum)) {
+      onShowToast('Por favor, insira números válidos para o intervalo.', 'error');
+      return;
+    }
+
+    const min = Math.min(startNum, endNum);
+    const max = Math.max(startNum, endNum);
+
+    const matched = mangaDetails.chapters.filter((ch) => {
+      const match = ch.match(/\d+/);
+      if (match) {
+        const num = parseInt(match[0]);
+        return num >= min && num <= max;
+      }
+      return false;
+    });
+
+    setSelectedChapters((prev) => {
+      const next = new Set([...prev, ...matched]);
+      return Array.from(next);
+    });
+
+    onShowToast(`${matched.length} capítulos selecionados pelo intervalo.`, 'success');
+    setIsRangeActive(false);
+    setRangeStart('');
+    setRangeEnd('');
+  };
+
+  const handleStartDownload = () => {
+    if (selectedChapters.length === 0) {
+      onShowToast('Selecione pelo menos um capítulo para baixar.', 'error');
+      return;
+    }
+    startDownload(selectedChapters);
+    onClose();
+    onShowToast('Download iniciado! Acompanhe na aba Downloads.', 'success');
+    setSelectedChapters([]);
+  };
+
+  // Filter chapters by search input
+  const filteredChapters = mangaDetails
+    ? mangaDetails.chapters.filter((ch) =>
+        ch.toLowerCase().includes(searchChapter.toLowerCase())
+      )
+    : [];
+
+  const displayedChapters = sortAscending
+    ? [...filteredChapters].reverse()
+    : filteredChapters;
+
+  return (
+    <Modal
+      visible={isOpen}
+      animationType="slide"
+      onRequestClose={onClose}>
+      <ThemedView style={styles.modalOverlay}>
+        {loadingDetails ? (
+          <View style={styles.modalLoading}>
+            <ActivityIndicator size="large" color={theme.accent} />
+            <ThemedText type="small" themeColor="textSecondary" style={{ marginTop: Spacing.two }}>
+              Carregando detalhes do mangá...
+            </ThemedText>
+            <Pressable
+              onPress={onClose}
+              style={styles.cancelFetchBtn}>
+              <ThemedText type="smallBold" themeColor="textSecondary">Cancelar</ThemedText>
+            </Pressable>
+          </View>
+        ) : (
+          mangaDetails && (
+            <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <Pressable onPress={onClose} style={styles.modalBackBtn}>
+                  <SymbolView name="chevron.left" size={18} tintColor={theme.text} />
+                  <ThemedText type="smallBold" style={{ marginLeft: 4 }}>Voltar</ThemedText>
+                </Pressable>
+                <ThemedText type="smallBold" style={styles.modalHeaderTitle} numberOfLines={1}>
+                  Detalhes do Mangá
+                </ThemedText>
+                <View style={{ width: 70 }} />
+              </View>
+
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={styles.modalScrollContent}
+                showsVerticalScrollIndicator={false}>
+                
+                {/* Summary Block */}
+                <View style={styles.mangaMetaBlock}>
+                  <Image
+                    source={{ uri: mangaDetails.coverUrl }}
+                    style={styles.detailCoverImage}
+                    contentFit="cover"
+                  />
+                  <View style={styles.detailMetaInfo}>
+                    <ThemedText type="default" style={styles.detailTitle}>
+                      {mangaDetails.title}
+                    </ThemedText>
+                    <View style={styles.detailSourceRow}>
+                      <SymbolView name="globe" size={12} tintColor={theme.textSecondary} />
+                      <ThemedText type="small" themeColor="textSecondary" style={{ marginLeft: 4 }}>
+                        {mangaDetails.source}
+                      </ThemedText>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Synopsis */}
+                <ThemedView type="backgroundElement" style={styles.synopsisCard}>
+                  <ThemedText type="smallBold" style={{ marginBottom: 4 }}>Sinopse</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.synopsisText}>
+                    {mangaDetails.synopsis}
+                  </ThemedText>
+                </ThemedView>
+
+                <View style={sharedStyles.divider} />
+
+                {/* Selection Header */}
+                <View style={styles.selectionControls}>
+                  <ThemedText type="smallBold">
+                    Capítulos ({selectedChapters.length}/{mangaDetails.chapters.length})
+                  </ThemedText>
+                  <View style={styles.bulkButtons}>
+                    <Pressable onPress={handleSelectAll} style={sharedStyles.actionPill}>
+                      <ThemedText type="code" style={sharedStyles.actionPillText}>Todos</ThemedText>
+                    </Pressable>
+                    <Pressable onPress={handleSelectNone} style={sharedStyles.actionPill}>
+                      <ThemedText type="code" style={sharedStyles.actionPillText}>Nenhum</ThemedText>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setIsRangeActive(!isRangeActive)}
+                      style={[sharedStyles.actionPill, isRangeActive && sharedStyles.actionPillActive]}>
+                      <ThemedText type="code" style={[sharedStyles.actionPillText, isRangeActive && sharedStyles.actionPillTextActive]}>
+                        Intervalo
+                      </ThemedText>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {/* Range selection panel */}
+                {isRangeActive && (
+                  <View style={[styles.rangeBox, { backgroundColor: theme.backgroundElement }]}>
+                    <ThemedText type="small" style={styles.rangeText}>
+                      Selecionar do capítulo número:
+                    </ThemedText>
+                    <View style={styles.rangeInputs}>
+                      <TextInput
+                        value={rangeStart}
+                        onChangeText={setRangeStart}
+                        keyboardType="numeric"
+                        placeholder="Ex: 1"
+                        placeholderTextColor={theme.textSecondary}
+                        style={[styles.rangeInput, { color: theme.text, backgroundColor: theme.background, borderColor: theme.backgroundSelected }]}
+                      />
+                      <ThemedText type="small" style={{ marginHorizontal: Spacing.two }}>até</ThemedText>
+                      <TextInput
+                        value={rangeEnd}
+                        onChangeText={setRangeEnd}
+                        keyboardType="numeric"
+                        placeholder="Ex: 20"
+                        placeholderTextColor={theme.textSecondary}
+                        style={[styles.rangeInput, { color: theme.text, backgroundColor: theme.background, borderColor: theme.backgroundSelected }]}
+                      />
+                      <Pressable onPress={applyRangeSelection} style={[styles.rangeApplyBtn, { backgroundColor: theme.accent }]}>
+                        <ThemedText type="smallBold" style={{ color: '#fff' }}>Aplicar</ThemedText>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+
+                {/* Search and Sort row */}
+                <View style={styles.searchSortRow}>
+                  <View style={[styles.modalSearchWrapper, { backgroundColor: theme.backgroundElement }]}>
+                    <SymbolView name="magnifyingglass" size={12} tintColor={theme.textSecondary} />
+                    <TextInput
+                      value={searchChapter}
+                      onChangeText={setSearchChapter}
+                      placeholder="Buscar capítulo..."
+                      placeholderTextColor={theme.textSecondary}
+                      style={[styles.modalSearchInput, { color: theme.text }]}
+                    />
+                  </View>
+                  <Pressable
+                    onPress={() => setSortAscending(!sortAscending)}
+                    style={({ pressed }) => [
+                      styles.sortButton,
+                      {
+                        backgroundColor: theme.backgroundSelected,
+                        borderColor: theme.backgroundSelected,
+                        opacity: pressed ? 0.8 : 1,
+                      },
+                    ]}>
+                    <SymbolView
+                      name={sortAscending ? 'arrow.up.arrow.down.circle.fill' : 'arrow.up.arrow.down.circle'}
+                      size={14}
+                      tintColor={sortAscending ? theme.accent : theme.text}
+                    />
+                    <ThemedText type="smallBold" style={[styles.sortButtonText, { color: theme.text }]}>
+                      {sortAscending ? 'Crescente' : 'Decrescente'}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+
+                {/* Chapters List */}
+                <ScrollView
+                  style={styles.chaptersListWrapper}
+                  contentContainerStyle={styles.chaptersListContent}
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}>
+                  {displayedChapters.map((item, idx) => {
+                    const isChecked = selectedChapters.includes(item);
+                    return (
+                      <Pressable
+                        key={`${item}-${idx}`}
+                        onPress={() => toggleChapter(item)}
+                        style={({ pressed }) => [
+                          styles.chapterRow,
+                          {
+                            backgroundColor: isChecked ? theme.backgroundSelected : theme.background,
+                            borderColor: isChecked ? theme.accent : theme.backgroundSelected,
+                            opacity: pressed ? 0.8 : 1,
+                          },
+                        ]}>
+                        <ThemedText type="small" themeColor={isChecked ? 'text' : 'textSecondary'}>
+                          {item}
+                        </ThemedText>
+                        <SymbolView
+                          name={isChecked ? 'checkmark.square.fill' : 'square'}
+                          size={16}
+                          tintColor={isChecked ? theme.accent : theme.textSecondary}
+                        />
+                      </Pressable>
+                    );
+                  })}
+                  {displayedChapters.length === 0 && (
+                    <View style={styles.emptyChapters}>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        Nenhum capítulo encontrado.
+                      </ThemedText>
+                    </View>
+                  )}
+                </ScrollView>
+
+                {/* Download Action Button */}
+                {selectedChapters.length > 0 && (
+                  <Pressable
+                    onPress={handleStartDownload}
+                    style={({ pressed }) => [
+                      styles.downloadBtn,
+                      { backgroundColor: theme.accent, opacity: pressed ? 0.9 : 1 },
+                    ]}>
+                    <SymbolView name="arrow.down.circle.fill" size={18} tintColor="#fff" />
+                    <ThemedText type="default" style={styles.downloadBtnText}>
+                      Baixar {selectedChapters.length} {selectedChapters.length === 1 ? 'Capítulo' : 'Capítulos'}
+                    </ThemedText>
+                  </Pressable>
+                )}
+              </ScrollView>
+            </SafeAreaView>
+          )
+        )}
+      </ThemedView>
+    </Modal>
+  );
+}

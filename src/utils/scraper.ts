@@ -54,6 +54,14 @@ function normalizeUrl(url: string, baseUrl: string): string {
 }
 
 /**
+ * Strips WordPress image dimension suffixes (e.g. -193x278) to get the original high-resolution image
+ */
+export function getHighResImageUrl(url: string): string {
+  if (!url) return '';
+  return url.replace(/-\d+x\d+(\.\w+)$/, '$1');
+}
+
+/**
  * Fetch HTML helper with fake browser headers
  */
 async function fetchHtml(url: string): Promise<string> {
@@ -342,8 +350,11 @@ export async function fetchChapterImagesReal(chapterUrl: string): Promise<string
         cleanSrc.includes('placeholder') ||
         cleanSrc.endsWith('.gif');
       
-      if (!isAdOrIcon && !images.includes(cleanSrc)) {
-        images.push(cleanSrc);
+      if (!isAdOrIcon) {
+        const highResSrc = getHighResImageUrl(cleanSrc);
+        if (!images.includes(highResSrc)) {
+          images.push(highResSrc);
+        }
       }
     }
   });
@@ -359,6 +370,12 @@ export interface SearchResult {
   title: string;
   url: string;
   coverUrl: string;
+  rating?: string;
+  chapters?: Array<{
+    name: string;
+    date: string;
+    url?: string;
+  }>;
 }
 
 /**
@@ -390,10 +407,36 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
         cover = `${origin}${cover}`;
       }
 
+      // Scrape rating
+      const ratingEl = item.querySelector('.post-total-rating .score, .average-rating, .post-total-rating, .rating-stars, .average');
+      let rating = ratingEl?.textContent?.trim() || '';
+      const ratingMatch = rating.match(/\d+(\.\d+)?/);
+      rating = ratingMatch ? ratingMatch[0] : '';
+
+      // Scrape chapters
+      const chapterItems = item.querySelectorAll('.list-chapter .chapter-item, .list-chapter .chapter, .chapter-item, .latest-chap');
+      const chapters: Array<{ name: string; date: string; url?: string }> = [];
+      chapterItems.forEach((chEl) => {
+        const chLink = chEl.querySelector('a');
+        const chName = chLink?.textContent?.trim() || '';
+        const chUrl = chLink?.getAttribute('href') || '';
+        const chDateEl = chEl.querySelector('.post-on, .date, span:last-child');
+        const chDate = chDateEl?.textContent?.trim() || '';
+        if (chName) {
+          chapters.push({
+            name: chName.replace(/\s+/g, ' '),
+            date: chDate.replace(/\s+/g, ' '),
+            url: chUrl,
+          });
+        }
+      });
+
       results.push({
         title: title.replace(/\s+/g, ' '),
         url: href,
-        coverUrl: cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+        coverUrl: getHighResImageUrl(cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80'),
+        rating: rating || undefined,
+        chapters: chapters.length > 0 ? chapters.slice(0, 2) : undefined,
       });
     }
   });
@@ -415,10 +458,37 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
         } else if (cover.startsWith('/')) {
           cover = `${origin}${cover}`;
         }
+
+        // Scrape rating (fallback)
+        const ratingEl = item.querySelector('.post-total-rating .score, .average-rating, .post-total-rating, .rating-stars, .average');
+        let rating = ratingEl?.textContent?.trim() || '';
+        const ratingMatch = rating.match(/\d+(\.\d+)?/);
+        rating = ratingMatch ? ratingMatch[0] : '';
+
+        // Scrape chapters (fallback)
+        const chapterItems = item.querySelectorAll('.list-chapter .chapter-item, .list-chapter .chapter, .chapter-item, .latest-chap');
+        const chapters: Array<{ name: string; date: string; url?: string }> = [];
+        chapterItems.forEach((chEl) => {
+          const chLink = chEl.querySelector('a');
+          const chName = chLink?.textContent?.trim() || '';
+          const chUrl = chLink?.getAttribute('href') || '';
+          const chDateEl = chEl.querySelector('.post-on, .date, span:last-child');
+          const chDate = chDateEl?.textContent?.trim() || '';
+          if (chName) {
+            chapters.push({
+              name: chName.replace(/\s+/g, ' '),
+              date: chDate.replace(/\s+/g, ' '),
+              url: chUrl,
+            });
+          }
+        });
+
         results.push({
           title: title.replace(/\s+/g, ' '),
           url: href,
-          coverUrl: cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          coverUrl: getHighResImageUrl(cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80'),
+          rating: rating || undefined,
+          chapters: chapters.length > 0 ? chapters.slice(0, 2) : undefined,
         });
       }
     });
@@ -453,10 +523,36 @@ export async function fetchLatestUpdatesReal(source: string): Promise<SearchResu
         cover = `${origin}${cover}`;
       }
 
+      // Scrape rating
+      const ratingEl = item.querySelector('.post-total-rating .score, .average-rating, .post-total-rating, .rating-stars, .average');
+      let rating = ratingEl?.textContent?.trim() || '';
+      const ratingMatch = rating.match(/\d+(\.\d+)?/);
+      rating = ratingMatch ? ratingMatch[0] : '';
+
+      // Scrape chapters
+      const chapterItems = item.querySelectorAll('.list-chapter .chapter-item, .list-chapter .chapter, .chapter-item, .latest-chap');
+      const chapters: Array<{ name: string; date: string; url?: string }> = [];
+      chapterItems.forEach((chEl) => {
+        const chLink = chEl.querySelector('a');
+        const chName = chLink?.textContent?.trim() || '';
+        const chUrl = chLink?.getAttribute('href') || '';
+        const chDateEl = chEl.querySelector('.post-on, .date, span:last-child');
+        const chDate = chDateEl?.textContent?.trim() || '';
+        if (chName) {
+          chapters.push({
+            name: chName.replace(/\s+/g, ' '),
+            date: chDate.replace(/\s+/g, ' '),
+            url: chUrl,
+          });
+        }
+      });
+
       results.push({
         title: title.replace(/\s+/g, ' '),
         url: href,
-        coverUrl: cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+        coverUrl: getHighResImageUrl(cover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80'),
+        rating: rating || undefined,
+        chapters: chapters.length > 0 ? chapters.slice(0, 2) : undefined,
       });
     }
   });
