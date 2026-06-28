@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   TextInput,
   Pressable,
@@ -15,9 +15,12 @@ import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useManga } from '@/context/manga-context';
 import { useTheme } from '@/hooks/use-theme';
+import { useFocusEffect } from 'expo-router';
+import { toggleFavoriteLocal, getActiveFavoritesLocal } from '@/utils/database';
 
 // Import separated components and styles
 import MangaDetailsModal from '@/components/manga-details-modal';
+import MangaReaderModal from '@/components/manga-reader-modal';
 import { createSharedStyles } from '@/styles/shared.styles';
 import { createHomeStyles } from '@/styles/home.styles';
 
@@ -40,11 +43,54 @@ export default function HomeScreen() {
     loadingMore,
     fetchLatestUpdates,
     fetchMoreLatestUpdates,
+    localLibrary,
+    updateLastReadChapter,
+    scanLibrary,
   } = useManga();
 
   const [searchInput, setSearchInput] = useState('');
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [showSourceSelector, setShowSourceSelector] = useState(false);
+
+  // Reader Modal State
+  const [isReaderOpen, setIsReaderOpen] = useState(false);
+  const [selectedReaderManga, setSelectedReaderManga] = useState<any | null>(null);
+  const [initialChapter, setInitialChapter] = useState<string | null>(null);
+
+  const handleOpenReaderFromDetails = (mangaItem: any, chapterFolder: string) => {
+    updateLastReadChapter(mangaItem.savePath, chapterFolder);
+    setSelectedReaderManga(mangaItem);
+    setInitialChapter(chapterFolder);
+    setIsReaderOpen(true);
+  };
+
+  // Favorites state
+  const [favoriteTitles, setFavoriteTitles] = useState<Set<string>>(new Set());
+
+  const loadFavorites = useCallback(async () => {
+    try {
+      const activeFavs = await getActiveFavoritesLocal();
+      setFavoriteTitles(new Set(activeFavs.map(f => f.title.toLowerCase())));
+    } catch (err) {
+      console.error('Erro ao buscar favoritos:', err);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      scanLibrary();
+      loadFavorites();
+    }, [scanLibrary, loadFavorites])
+  );
+
+  const handleToggleFavorite = async (title: string, coverUrl: string | null, mangaUrl: string) => {
+    try {
+      await toggleFavoriteLocal(title, coverUrl, mangaUrl, activeSource);
+      await loadFavorites();
+    } catch (err) {
+      console.error('Erro ao favoritar:', err);
+    }
+  };
 
   // Scroll-to-top button
   const flatListRef = useRef<FlatList>(null);
@@ -254,6 +300,8 @@ export default function HomeScreen() {
                 const ratingVal = item.rating ? parseFloat(item.rating) : (3.5 + (item.title.charCodeAt(0) % 15) / 10);
                 const filledStars = Math.round(ratingVal);
                 
+                const isFav = favoriteTitles.has(item.title.toLowerCase());
+
                 return (
                   <Pressable
                     onPress={() => handleSelectManga(item.url)}
@@ -264,11 +312,35 @@ export default function HomeScreen() {
                         opacity: pressed ? 0.9 : 1,
                       },
                     ]}>
-                    <Image
-                      source={{ uri: item.coverUrl }}
-                      style={styles.mangaCardImage}
-                      contentFit="cover"
-                    />
+                    <View style={{ position: 'relative' }}>
+                      <Image
+                        source={{ uri: item.coverUrl }}
+                        style={styles.mangaCardImage}
+                        contentFit="cover"
+                      />
+                      {/* Star overlay button */}
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleToggleFavorite(item.title, item.coverUrl, item.url);
+                        }}
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 6,
+                          backgroundColor: 'rgba(0,0,0,0.6)',
+                          borderRadius: 12,
+                          padding: 4,
+                          zIndex: 10,
+                        }}>
+                        <SymbolView
+                          key={isFav ? 'fav-yes' : 'fav-no'}
+                          name={isFav ? 'star.fill' : 'star'}
+                          size={12}
+                          tintColor={isFav ? '#FFD700' : '#FFF'}
+                        />
+                      </Pressable>
+                    </View>
                     <View style={styles.mangaCardInfo}>
                       <ThemedText type="defaultSemiBold" numberOfLines={2} style={styles.mangaCardTitle}>
                         {item.title}
@@ -345,6 +417,18 @@ export default function HomeScreen() {
         isOpen={isDetailsModalOpen}
         onClose={() => setIsDetailsModalOpen(false)}
         onShowToast={showStatus}
+        onOpenReader={handleOpenReaderFromDetails}
+      />
+
+      {/* Reader Modal */}
+      <MangaReaderModal
+        isOpen={isReaderOpen}
+        onClose={() => {
+          setIsReaderOpen(false);
+          setInitialChapter(null);
+        }}
+        manga={selectedReaderManga ? localLibrary.find(l => l.savePath === selectedReaderManga.savePath) || selectedReaderManga : null}
+        initialChapter={initialChapter}
       />
 
       {/* Floating Scroll-to-Top Button */}

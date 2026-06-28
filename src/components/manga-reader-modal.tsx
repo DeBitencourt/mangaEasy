@@ -190,7 +190,7 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
       setChapterPages([]);
       setShowChapterSelector(false);
     }
-  }, [isOpen, manga]);
+  }, [isOpen, manga?.savePath]);
 
   // Toggle Android system navigation bar when reader is open
   useEffect(() => {
@@ -305,7 +305,12 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
       setLoadingChapters(false);
     }
   };
-
+  const loadChapterPages = async (
+    mangaPath: string,
+    chapterFolderName: string,
+    displayTitle: string = ''
+  ) => {
+    const isDirect = !chapterFolderName;
     const chapTitle = displayTitle || chapterFolderName || manga?.mangaTitle || 'Capítulo Único';
     setCurrentChapter(chapTitle);
     setLoadingPages(true);

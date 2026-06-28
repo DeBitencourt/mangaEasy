@@ -2,10 +2,12 @@ import { Platform } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 import { getDatabase, getDeviceId, Favorite, ToReadItem, ReadingHistory, ReadingProgress } from './database';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').trim();
+const supabaseAnonKey = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '').trim();
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = (supabaseUrl && supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
 
 export interface SyncStats {
   favoritesSynced: number;
@@ -18,13 +20,19 @@ export interface SyncStats {
  * Synchronizes local non-synced data with Supabase.
  */
 export async function syncLocalDataWithCloud(): Promise<SyncStats> {
-  const deviceId = await getDeviceId();
   const stats: SyncStats = {
     favoritesSynced: 0,
     toReadSynced: 0,
     historySynced: 0,
     progressSynced: 0,
   };
+
+  if (!supabase) {
+    console.warn('[SYNC] Supabase client is not initialized. Please configure EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file.');
+    return stats;
+  }
+
+  const deviceId = await getDeviceId();
 
   // --- 1. Sincronizar Favoritos ---
   let favoritesToSync: Favorite[] = [];
@@ -49,6 +57,8 @@ export async function syncLocalDataWithCloud(): Promise<SyncStats> {
       device_id: f.device_id,
       title: f.title,
       cover_url: f.cover_url,
+      manga_url: f.manga_url || null,
+      source: f.source || null,
       updated_at: f.updated_at,
       is_deleted: f.is_deleted === 1,
     }));
@@ -104,6 +114,8 @@ export async function syncLocalDataWithCloud(): Promise<SyncStats> {
       device_id: item.device_id,
       title: item.title,
       cover_url: item.cover_url,
+      manga_url: item.manga_url || null,
+      source: item.source || null,
       status: item.status,
       updated_at: item.updated_at,
       is_deleted: item.is_deleted === 1,
@@ -250,6 +262,9 @@ export async function syncLocalDataWithCloud(): Promise<SyncStats> {
  */
 export async function downloadCloudBackup(backupDeviceId: string): Promise<boolean> {
   try {
+    if (!supabase) {
+      throw new Error('Supabase client is not initialized. Please check your EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY variables.');
+    }
     // 1. Fetch from Supabase
     const favsRes = await supabase.from('favorites').select('*').eq('device_id', backupDeviceId).eq('is_deleted', false);
     const toReadRes = await supabase.from('to_read_list').select('*').eq('device_id', backupDeviceId).eq('is_deleted', false);
@@ -285,16 +300,16 @@ export async function downloadCloudBackup(backupDeviceId: string): Promise<boole
       // Import favorites
       for (const item of (favsRes.data || [])) {
         await db.runAsync(
-          'INSERT INTO favorites (id, device_id, title, cover_url, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, 0, 1)',
-          [item.id, item.device_id, item.title, item.cover_url, item.updated_at]
+          'INSERT INTO favorites (id, device_id, title, cover_url, manga_url, source, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1)',
+          [item.id, item.device_id, item.title, item.cover_url, item.manga_url, item.source, item.updated_at]
         );
       }
 
       // Import to read list
       for (const item of (toReadRes.data || [])) {
         await db.runAsync(
-          'INSERT INTO to_read_list (id, device_id, title, cover_url, status, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, 0, 1)',
-          [item.id, item.device_id, item.title, item.cover_url, item.status, item.updated_at]
+          'INSERT INTO to_read_list (id, device_id, title, cover_url, status, manga_url, source, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1)',
+          [item.id, item.device_id, item.title, item.cover_url, item.status, item.manga_url, item.source, item.updated_at]
         );
       }
 

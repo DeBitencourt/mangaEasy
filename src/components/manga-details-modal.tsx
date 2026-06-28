@@ -22,15 +22,16 @@ import { useTheme } from '@/hooks/use-theme';
 import { createSharedStyles } from '@/styles/shared.styles';
 import { createDetailsStyles } from '@/styles/details.styles';;
 import * as FileSystem from 'expo-file-system/legacy';
-import { toggleToReadLocal, isToReadLocal } from '@/utils/database';
+import { toggleToReadLocal, isToReadLocal, toggleFavoriteLocal, isFavoriteLocal, getMangaLastReadChapterLocal } from '@/utils/database';
 
 interface MangaDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onShowToast: (text: string, type: 'success' | 'error') => void;
+  onOpenReader?: (manga: any, chapterFolder: string) => void;
 }
 
-export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: MangaDetailsModalProps) {
+export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpenReader }: MangaDetailsModalProps) {
   const theme = useTheme();
   const sharedStyles = createSharedStyles(theme);
   const styles = createDetailsStyles(theme);
@@ -52,46 +53,74 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
   const [isRangeActive, setIsRangeActive] = useState(false);
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
-
   const [isToRead, setIsToRead] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [lastReadChapter, setLastReadChapter] = useState<string | null>(null);
 
   // Clear selections when modal opens/closes
   useEffect(() => {
     if (isOpen) {
       setSelectedChapters([]);
-      setIsRangeActive(false);
       setSearchChapter('');
+      setIsRangeActive(false);
       setRangeStart('');
       setRangeEnd('');
-      setSelectedType('');
-      setIsTypeDropdownOpen(false);
     }
   }, [isOpen]);
 
-  // Load To Read status
+  // Load To Read, Favorite, and Last Read status
   useEffect(() => {
-    const checkToReadStatus = async () => {
+    const checkStatus = async () => {
       if (isOpen && mangaDetails) {
         try {
           const toReadVal = await isToReadLocal(mangaDetails.title);
           setIsToRead(toReadVal);
+          
+          const favVal = await isFavoriteLocal(mangaDetails.title);
+          setIsFavorite(favVal);
+
+          const lastReadVal = await getMangaLastReadChapterLocal(mangaDetails.title);
+          setLastReadChapter(lastReadVal);
         } catch (e) {
           console.error(e);
         }
       }
     };
-    checkToReadStatus();
+    checkStatus();
   }, [isOpen, mangaDetails]);
 
   const handleToggleToRead = async () => {
     if (!mangaDetails) return;
     try {
-      const nextVal = await toggleToReadLocal(mangaDetails.title, mangaDetails.coverUrl);
+      const nextVal = await toggleToReadLocal(
+        mangaDetails.title,
+        mangaDetails.coverUrl,
+        'planning',
+        mangaDetails.url,
+        mangaDetails.source
+      );
       setIsToRead(nextVal);
       onShowToast(nextVal ? 'Adicionado à lista A Ler!' : 'Removido da lista A Ler.', 'success');
     } catch (e) {
       console.error(e);
       onShowToast('Erro ao atualizar lista A Ler.', 'error');
+    }
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!mangaDetails) return;
+    try {
+      const nextVal = await toggleFavoriteLocal(
+        mangaDetails.title,
+        mangaDetails.coverUrl,
+        mangaDetails.url,
+        mangaDetails.source
+      );
+      setIsFavorite(nextVal);
+      onShowToast(nextVal ? 'Adicionado aos Favoritos!' : 'Removido dos Favoritos.', 'success');
+    } catch (e) {
+      console.error(e);
+      onShowToast('Erro ao atualizar Favoritos.', 'error');
     }
   };
 
@@ -106,7 +135,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
         return;
       }
       const localEntry = localLibrary.find(
-        (item) => item.mangaTitle.toLowerCase() === mangaDetails.title.toLowerCase()
+        (item) => item.mangaTitle.trim().toLowerCase() === mangaDetails.title.trim().toLowerCase()
       );
       if (!localEntry) {
         setDownloadedNums(new Set());
@@ -263,42 +292,86 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
                       </ThemedText>
                     </View>
 
-                    {/* To Read (A Ler) Button */}
-                    <Pressable
-                      onPress={handleToggleToRead}
-                      style={({ pressed }) => [
-                        {
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          marginTop: 8,
-                          alignSelf: 'flex-start',
-                          paddingVertical: 4,
-                          paddingHorizontal: 8,
-                          borderRadius: 6,
-                          borderWidth: 1,
-                          borderColor: isToRead ? '#4CAF50' : theme.textSecondary,
-                          backgroundColor: isToRead ? 'rgba(76, 175, 80, 0.08)' : 'transparent',
-                          opacity: pressed ? 0.8 : 1,
-                        }
-                      ]}
-                    >
-                      <SymbolView
-                        name={isToRead ? 'checkmark.circle.fill' : 'plus.circle'}
-                        size={12}
-                        tintColor={isToRead ? '#4CAF50' : theme.textSecondary}
-                      />
-                      <ThemedText
-                        type="code"
-                        style={{
-                          fontSize: 10,
-                          marginLeft: 4,
-                          color: isToRead ? '#4CAF50' : theme.textSecondary,
-                          fontWeight: 'bold',
-                        }}
+                    {lastReadChapter && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                        <SymbolView name="clock.fill" size={10} tintColor={theme.accent} />
+                        <ThemedText type="smallBold" style={{ marginLeft: 4, color: theme.accent, fontSize: 10 }}>
+                          Último lido: {lastReadChapter}
+                        </ThemedText>
+                      </View>
+                    )}
+
+                    <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                      {/* To Read (A Ler) Button */}
+                      <Pressable
+                        onPress={handleToggleToRead}
+                        style={({ pressed }) => [
+                          {
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            paddingVertical: 4,
+                            paddingHorizontal: 8,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: isToRead ? '#4CAF50' : theme.textSecondary,
+                            backgroundColor: isToRead ? 'rgba(76, 175, 80, 0.08)' : 'transparent',
+                            opacity: pressed ? 0.8 : 1,
+                          }
+                        ]}
                       >
-                        {isToRead ? 'A Ler (Na Lista)' : 'Adicionar A Ler'}
-                      </ThemedText>
-                    </Pressable>
+                        <SymbolView
+                          name={isToRead ? 'checkmark.circle.fill' : 'plus.circle'}
+                          size={12}
+                          tintColor={isToRead ? '#4CAF50' : theme.textSecondary}
+                        />
+                        <ThemedText
+                          type="code"
+                          style={{
+                            fontSize: 10,
+                            marginLeft: 4,
+                            color: isToRead ? '#4CAF50' : theme.textSecondary,
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {isToRead ? 'A Ler (Na Lista)' : 'A Ler'}
+                        </ThemedText>
+                      </Pressable>
+
+                      {/* Favorite Button */}
+                      <Pressable
+                        onPress={handleToggleFavorite}
+                        style={({ pressed }) => [
+                          {
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            paddingVertical: 4,
+                            paddingHorizontal: 8,
+                            borderRadius: 6,
+                            borderWidth: 1,
+                            borderColor: isFavorite ? '#FFD700' : theme.textSecondary,
+                            backgroundColor: isFavorite ? 'rgba(255, 215, 0, 0.08)' : 'transparent',
+                            opacity: pressed ? 0.8 : 1,
+                          }
+                        ]}
+                      >
+                        <SymbolView
+                          name={isFavorite ? 'star.fill' : 'star'}
+                          size={12}
+                          tintColor={isFavorite ? '#FFD700' : theme.textSecondary}
+                        />
+                        <ThemedText
+                          type="code"
+                          style={{
+                            fontSize: 10,
+                            marginLeft: 4,
+                            color: isFavorite ? '#FFD700' : theme.textSecondary,
+                            fontWeight: 'bold',
+                          }}
+                        >
+                          {isFavorite ? 'Favoritado' : 'Favoritar'}
+                        </ThemedText>
+                      </Pressable>
+                    </View>
 
                     {/* Custom Type Override Dropdown */}
                     {!mangaDetails.source?.toLowerCase().includes('asura') && (
@@ -369,6 +442,33 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
                     )}
                   </View>
                 </View>
+
+                {lastReadChapter && localLibrary.find(l => l.mangaTitle.trim().toLowerCase() === mangaDetails.title.trim().toLowerCase()) && onOpenReader && (
+                  <Pressable
+                    onPress={() => {
+                      const localEntry = localLibrary.find(l => l.mangaTitle.trim().toLowerCase() === mangaDetails.title.trim().toLowerCase());
+                      if (localEntry) {
+                        onOpenReader(localEntry, lastReadChapter);
+                        onClose();
+                      }
+                    }}
+                    style={({ pressed }) => [
+                      styles.downloadBtn,
+                      {
+                        backgroundColor: theme.accent,
+                        opacity: pressed ? 0.85 : 1,
+                      },
+                    ]}
+                  >
+                    <SymbolView name="play.fill" size={14} tintColor="#000000" />
+                    <ThemedText type="smallBold" style={[styles.downloadBtnText, { color: '#000000' }]}>
+                      Continuar Lendo
+                    </ThemedText>
+                    <ThemedText type="code" style={{ color: 'rgba(0,0,0,0.6)', fontSize: 11 }}>
+                      {lastReadChapter}
+                    </ThemedText>
+                  </Pressable>
+                )}
 
                 {/* Synopsis */}
                 <ThemedView type="backgroundElement" style={styles.synopsisCard}>

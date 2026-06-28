@@ -1,25 +1,26 @@
-import React, { useState, useEffect } from 'react';
-import {
-  TextInput,
-  Pressable,
-  ScrollView,
-  Modal,
-  Platform,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Image } from 'expo-image';
-import { SymbolView } from '@/components/ui/symbol-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { SymbolView } from '@/components/ui/symbol-view';
 import { Spacing } from '@/constants/theme';
 import { HistoryItem } from '@/context/manga-context';
 import { useTheme } from '@/hooks/use-theme';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image } from 'expo-image';
+import { useEffect, useState } from 'react';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Import separated styles
-import { createSharedStyles } from '@/styles/shared.styles';
 import { createDetailsStyles } from '@/styles/details.styles';
+import { createSharedStyles } from '@/styles/shared.styles';
+import { getMangaLastReadChapterLocal } from '@/utils/database';
 
 interface LocalMangaDetailsModalProps {
   isOpen: boolean;
@@ -37,14 +38,19 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
   const [localChapters, setLocalChapters] = useState<string[]>([]);
   const [searchChapter, setSearchChapter] = useState('');
   const [sortAscending, setSortAscending] = useState(false);
+  const [lastReadChapter, setLastReadChapter] = useState<string | null>(null);
 
   // Clear selections/search when modal opens/closes
   useEffect(() => {
     if (isOpen && manga) {
       loadLocalChapters(manga);
       setSearchChapter('');
+      getMangaLastReadChapterLocal(manga.mangaTitle)
+        .then(setLastReadChapter)
+        .catch(console.error);
     } else {
       setLocalChapters([]);
+      setLastReadChapter(null);
     }
   }, [isOpen, manga]);
 
@@ -60,14 +66,14 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
       if (!exists.exists) return;
 
       const contents = await FileSystem.readDirectoryAsync(item.savePath);
-      
+
       const hasDirectImages = contents.some(name => {
         const lower = name.toLowerCase();
         if (lower.startsWith('cover.')) return false;
         return (
-          lower.endsWith('.jpg') || 
-          lower.endsWith('.jpeg') || 
-          lower.endsWith('.png') || 
+          lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.png') ||
           lower.endsWith('.webp')
         );
       });
@@ -107,6 +113,46 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
     }
   };
 
+  const handleDeleteChapter = async (chapterFolder: string) => {
+    if (!manga) return;
+    try {
+      const chapterPath = `${manga.savePath}/${chapterFolder}`;
+      const exists = await FileSystem.getInfoAsync(chapterPath);
+      if (exists.exists) {
+        await FileSystem.deleteAsync(chapterPath, { idempotent: true });
+      }
+
+      // Reload the chapter list
+      await loadLocalChapters(manga);
+
+      // Check if there are any chapters left. If not, delete the whole manga from library!
+      const contents = await FileSystem.readDirectoryAsync(manga.savePath);
+      const remainingChaps = contents.filter(name => {
+        if (name.startsWith('.')) return false;
+        const lower = name.toLowerCase();
+        return (
+          !lower.startsWith('cover.') &&
+          !lower.endsWith('.json') &&
+          !lower.endsWith('.jpg') &&
+          !lower.endsWith('.jpeg') &&
+          !lower.endsWith('.png') &&
+          !lower.endsWith('.webp')
+        );
+      });
+
+      if (remainingChaps.length === 0) {
+        // No chapters left, delete the manga folder and close details
+        if (onDelete) {
+          onClose();
+          onDelete(manga);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao excluir capítulo local:', err);
+      alert('Erro ao excluir o capítulo.');
+    }
+  };
+
   const formatChapterNameForDisplay = (folderName: string) => {
     if (folderName.startsWith('cap-')) {
       const num = folderName.replace('cap-', '');
@@ -131,7 +177,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
       onRequestClose={onClose}>
       <ThemedView style={styles.modalOverlay}>
         {manga && (
-          <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right']}>
+          <SafeAreaView style={{ flex: 1 }} edges={['top', 'left', 'right', 'bottom']}>
             {/* Modal Header */}
             <View style={styles.modalHeader}>
               <Pressable onPress={onClose} style={styles.modalBackBtn}>
@@ -163,11 +209,8 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
               )}
             </View>
 
-            <ScrollView
-              style={styles.modalScroll}
-              contentContainerStyle={styles.modalScrollContent}
-              showsVerticalScrollIndicator={false}>
-              
+            <View style={{ flex: 1, paddingHorizontal: Spacing.three, paddingBottom: 0 }}>
+
               {/* Summary Block */}
               <View style={styles.mangaMetaBlock}>
                 <Image
@@ -179,7 +222,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                   <ThemedText type="default" style={styles.detailTitle}>
                     {manga.mangaTitle}
                   </ThemedText>
-                  
+
                   {/* Type Badge */}
                   <View style={{
                     alignSelf: 'flex-start',
@@ -206,6 +249,15 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                       {manga.savePath}
                     </ThemedText>
                   </View>
+
+                  {lastReadChapter && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                      <SymbolView name="clock.fill" size={10} tintColor={theme.accent} />
+                      <ThemedText type="smallBold" style={{ marginLeft: 4, color: theme.accent, fontSize: 10 }}>
+                        Último lido: {formatChapterNameForDisplay(lastReadChapter)}
+                      </ThemedText>
+                    </View>
+                  )}
                 </View>
               </View>
 
@@ -220,9 +272,9 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
               </ThemedView>
 
               {/* Continue Reading Button */}
-              {manga.lastReadChapter && (
+              {lastReadChapter && (
                 <Pressable
-                  onPress={() => onOpenReader(manga, manga.lastReadChapter!)}
+                  onPress={() => onOpenReader(manga, lastReadChapter)}
                   style={({ pressed }) => [
                     styles.downloadBtn,
                     {
@@ -236,7 +288,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                     Continuar Lendo
                   </ThemedText>
                   <ThemedText type="code" style={{ color: 'rgba(0,0,0,0.6)', fontSize: 11 }}>
-                    {formatChapterNameForDisplay(manga.lastReadChapter)}
+                    {formatChapterNameForDisplay(lastReadChapter)}
                   </ThemedText>
                 </Pressable>
               )}
@@ -283,33 +335,69 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                 </Pressable>
               </View>
 
-              {/* Chapters List */}
+              {/* Chapters List (Overflow Y) */}
               <ScrollView
-                style={[styles.chaptersListWrapper, { maxHeight: 380 }]}
-                contentContainerStyle={styles.chaptersListContent}
-                nestedScrollEnabled={true}
+                style={{ flex: 1, marginTop: Spacing.two }}
+                contentContainerStyle={{ gap: Spacing.one, paddingBottom: Spacing.four }}
                 showsVerticalScrollIndicator={true}>
                 {displayedChapters.map((item, idx) => (
-                  <Pressable
+                  <View
                     key={`${item}-${idx}`}
-                    onPress={() => onOpenReader(manga, item)}
-                    style={({ pressed }) => [
-                      styles.chapterRow,
-                      {
-                        backgroundColor: theme.backgroundElement,
-                        borderColor: theme.backgroundSelected,
-                        opacity: pressed ? 0.8 : 1,
-                      },
-                    ]}>
-                    <ThemedText type="smallBold" style={{ color: theme.text }}>
-                      {formatChapterNameForDisplay(item)}
-                    </ThemedText>
-                    <SymbolView
-                      name="play.fill"
-                      size={12}
-                      tintColor={theme.accent}
-                    />
-                  </Pressable>
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: theme.backgroundElement,
+                      borderColor: theme.backgroundSelected,
+                      borderWidth: 1,
+                      borderRadius: 6,
+                      paddingLeft: Spacing.two,
+                      marginBottom: Spacing.one,
+                      height: 40,
+                    }}>
+                    <Pressable
+                      onPress={() => onOpenReader(manga, item)}
+                      style={({ pressed }) => [
+                        {
+                          flex: 1,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          height: '100%',
+                          paddingRight: Spacing.two,
+                          opacity: pressed ? 0.7 : 1,
+                        }
+                      ]}>
+                      <ThemedText type="smallBold" style={{ color: theme.text, flex: 1, fontSize: 13 }} numberOfLines={1}>
+                        {formatChapterNameForDisplay(item)}
+                      </ThemedText>
+                      <SymbolView
+                        name="play.fill"
+                        size={10}
+                        tintColor={theme.accent}
+                      />
+                    </Pressable>
+
+                    {/* Vertical Divider */}
+                    <View style={{ width: 1, height: 20, backgroundColor: theme.backgroundSelected }} />
+
+                    {/* Delete Chapter Button */}
+                    <Pressable
+                      onPress={() => handleDeleteChapter(item)}
+                      style={({ pressed }) => [
+                        {
+                          paddingHorizontal: Spacing.three,
+                          justifyContent: 'center',
+                          height: '100%',
+                          opacity: pressed ? 0.5 : 1,
+                        }
+                      ]}>
+                      <SymbolView
+                        name="trash"
+                        size={12}
+                        tintColor="#f44336"
+                      />
+                    </Pressable>
+                  </View>
                 ))}
                 {displayedChapters.length === 0 && (
                   <View style={styles.emptyChapters}>
@@ -319,7 +407,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                   </View>
                 )}
               </ScrollView>
-            </ScrollView>
+            </View>
           </SafeAreaView>
         )}
       </ThemedView>

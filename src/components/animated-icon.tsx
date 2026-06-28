@@ -1,14 +1,20 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
 const DURATION = 600;
 
 export function AnimatedSplashOverlay() {
   const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setVisible(false);
+    }, DURATION + 200);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (!visible) return null;
 
@@ -33,12 +39,7 @@ export function AnimatedSplashOverlay() {
 
   return (
     <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
-        'worklet';
-        if (finished) {
-          scheduleOnRN(setVisible, false);
-        }
-      })}
+      entering={splashKeyframe.duration(DURATION)}
       style={styles.backgroundSolidColor}
     />
   );
@@ -119,7 +120,7 @@ const styles = StyleSheet.create({
   },
   background: {
     borderRadius: 40,
-    experimental_backgroundImage: `linear-gradient(180deg, #A855F7, #7C3AED)`,
+    backgroundColor: '#8B5CF6',
     width: 128,
     height: 128,
     position: 'absolute',

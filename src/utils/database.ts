@@ -7,6 +7,8 @@ export interface Favorite {
   device_id: string;
   title: string;
   cover_url: string | null;
+  manga_url?: string | null;
+  source?: string | null;
   updated_at: string;
   is_deleted: number; // 0 or 1
   synced: number; // 0 or 1
@@ -17,6 +19,8 @@ export interface ToReadItem {
   device_id: string;
   title: string;
   cover_url: string | null;
+  manga_url?: string | null;
+  source?: string | null;
   status: 'planning' | 'reading' | 'completed';
   updated_at: string;
   is_deleted: number;
@@ -138,6 +142,8 @@ async function initSchema(db: SQLite.SQLiteDatabase) {
       device_id TEXT NOT NULL,
       title TEXT NOT NULL,
       cover_url TEXT,
+      manga_url TEXT,
+      source TEXT,
       updated_at TEXT NOT NULL,
       is_deleted INTEGER DEFAULT 0,
       synced INTEGER DEFAULT 0,
@@ -152,6 +158,8 @@ async function initSchema(db: SQLite.SQLiteDatabase) {
       device_id TEXT NOT NULL,
       title TEXT NOT NULL,
       cover_url TEXT,
+      manga_url TEXT,
+      source TEXT,
       status TEXT DEFAULT 'planning',
       updated_at TEXT NOT NULL,
       is_deleted INTEGER DEFAULT 0,
@@ -190,12 +198,26 @@ async function initSchema(db: SQLite.SQLiteDatabase) {
       UNIQUE(device_id, title, chapter_title)
     );
   `);
+
+  // Migrations for existing databases
+  try {
+    await db.execAsync('ALTER TABLE favorites ADD COLUMN manga_url TEXT;');
+  } catch (e) {}
+  try {
+    await db.execAsync('ALTER TABLE favorites ADD COLUMN source TEXT;');
+  } catch (e) {}
+  try {
+    await db.execAsync('ALTER TABLE to_read_list ADD COLUMN manga_url TEXT;');
+  } catch (e) {}
+  try {
+    await db.execAsync('ALTER TABLE to_read_list ADD COLUMN source TEXT;');
+  } catch (e) {}
 }
 
 // --- CRUD Operations ---
 
 // 1. Favorites CRUD
-export async function toggleFavoriteLocal(title: string, coverUrl: string | null): Promise<boolean> {
+export async function toggleFavoriteLocal(title: string, coverUrl: string | null, mangaUrl?: string, source?: string): Promise<boolean> {
   const deviceId = await getDeviceId();
   const timestamp = new Date().toISOString();
 
@@ -215,6 +237,8 @@ export async function toggleFavoriteLocal(title: string, coverUrl: string | null
         favs[existingIdx].is_deleted = 0;
         favs[existingIdx].updated_at = timestamp;
         favs[existingIdx].synced = 0;
+        if (mangaUrl) favs[existingIdx].manga_url = mangaUrl;
+        if (source) favs[existingIdx].source = source;
         webDb.setItem(listKey, JSON.stringify(favs));
         return true; // favoritado novamente
       }
@@ -224,6 +248,8 @@ export async function toggleFavoriteLocal(title: string, coverUrl: string | null
         device_id: deviceId,
         title,
         cover_url: coverUrl,
+        manga_url: mangaUrl || null,
+        source: source || null,
         updated_at: timestamp,
         is_deleted: 0,
         synced: 0,
@@ -244,14 +270,14 @@ export async function toggleFavoriteLocal(title: string, coverUrl: string | null
   if (existing) {
     const newIsDeleted = existing.is_deleted === 0 ? 1 : 0;
     await db.runAsync(
-      'UPDATE favorites SET is_deleted = ?, updated_at = ?, synced = 0 WHERE id = ?',
-      [newIsDeleted, timestamp, existing.id]
+      'UPDATE favorites SET is_deleted = ?, updated_at = ?, synced = 0, manga_url = COALESCE(?, manga_url), source = COALESCE(?, source) WHERE id = ?',
+      [newIsDeleted, timestamp, mangaUrl || null, source || null, existing.id]
     );
     return newIsDeleted === 0;
   } else {
     await db.runAsync(
-      'INSERT OR REPLACE INTO favorites (id, device_id, title, cover_url, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, 0, 0)',
-      [generateUUID(), deviceId, title, coverUrl, timestamp]
+      'INSERT OR REPLACE INTO favorites (id, device_id, title, cover_url, manga_url, source, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)',
+      [generateUUID(), deviceId, title, coverUrl, mangaUrl || null, source || null, timestamp]
     );
     return true;
   }
@@ -294,7 +320,7 @@ export async function getActiveFavoritesLocal(): Promise<Favorite[]> {
 }
 
 // 2. To Read List CRUD
-export async function toggleToReadLocal(title: string, coverUrl: string | null, status: 'planning' | 'reading' | 'completed' = 'planning'): Promise<boolean> {
+export async function toggleToReadLocal(title: string, coverUrl: string | null, status: 'planning' | 'reading' | 'completed' = 'planning', mangaUrl?: string, source?: string): Promise<boolean> {
   const deviceId = await getDeviceId();
   const timestamp = new Date().toISOString();
 
@@ -315,6 +341,8 @@ export async function toggleToReadLocal(title: string, coverUrl: string | null, 
         list[existingIdx].status = status;
         list[existingIdx].updated_at = timestamp;
         list[existingIdx].synced = 0;
+        if (mangaUrl) list[existingIdx].manga_url = mangaUrl;
+        if (source) list[existingIdx].source = source;
         webDb.setItem(listKey, JSON.stringify(list));
         return true;
       }
@@ -324,6 +352,8 @@ export async function toggleToReadLocal(title: string, coverUrl: string | null, 
         device_id: deviceId,
         title,
         cover_url: coverUrl,
+        manga_url: mangaUrl || null,
+        source: source || null,
         status,
         updated_at: timestamp,
         is_deleted: 0,
@@ -345,14 +375,14 @@ export async function toggleToReadLocal(title: string, coverUrl: string | null, 
   if (existing) {
     const newIsDeleted = existing.is_deleted === 0 ? 1 : 0;
     await db.runAsync(
-      'UPDATE to_read_list SET is_deleted = ?, status = ?, updated_at = ?, synced = 0 WHERE id = ?',
-      [newIsDeleted, status, timestamp, existing.id]
+      'UPDATE to_read_list SET is_deleted = ?, status = ?, updated_at = ?, synced = 0, manga_url = COALESCE(?, manga_url), source = COALESCE(?, source) WHERE id = ?',
+      [newIsDeleted, status, timestamp, mangaUrl || null, source || null, existing.id]
     );
     return newIsDeleted === 0;
   } else {
     await db.runAsync(
-      'INSERT OR REPLACE INTO to_read_list (id, device_id, title, cover_url, status, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, 0, 0)',
-      [generateUUID(), deviceId, title, coverUrl, status, timestamp]
+      'INSERT OR REPLACE INTO to_read_list (id, device_id, title, cover_url, status, manga_url, source, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)',
+      [generateUUID(), deviceId, title, coverUrl, status, mangaUrl || null, source || null, timestamp]
     );
     return true;
   }
@@ -518,4 +548,26 @@ export async function getChapterProgressLocal(title: string, chapterTitle: strin
     [deviceId, title, chapterTitle]
   );
   return res;
+}
+
+export async function getMangaLastReadChapterLocal(title: string): Promise<string | null> {
+  const deviceId = await getDeviceId();
+  const sanitized = title.replace(/[\\/:*?"<>|]/g, '_').trim();
+
+  if (Platform.OS === 'web') {
+    const history: ReadingHistory[] = JSON.parse(webDb.getItem('web_history') || '[]');
+    const filtered = history
+      .filter((h) => (h.title.toLowerCase() === title.toLowerCase() || h.title.toLowerCase() === sanitized.toLowerCase()) && h.is_deleted === 0)
+      .sort((a, b) => b.read_at.localeCompare(a.read_at));
+    return filtered.length > 0 ? filtered[0].chapter_title : null;
+  }
+
+  const db = await getDatabase();
+  if (!db) return null;
+
+  const res = await db.getFirstAsync<{ chapter_title: string }>(
+    'SELECT chapter_title FROM reading_history WHERE device_id = ? AND (LOWER(title) = LOWER(?) OR LOWER(title) = LOWER(?)) AND is_deleted = 0 ORDER BY read_at DESC LIMIT 1',
+    [deviceId, title, sanitized]
+  );
+  return res ? res.chapter_title : null;
 }

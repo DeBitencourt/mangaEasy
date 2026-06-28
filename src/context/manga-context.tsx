@@ -192,7 +192,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (Platform.OS === 'web' || !BackgroundService) return;
 
-    const hasActive = activeDownloads.some(dl => dl.status === 'downloading');
+    // Temporarily bypass native background service to prevent Android 13+ permission crashes
+    return;
 
     const manageBackgroundService = async () => {
       const isRunning = BackgroundService.isRunning();
@@ -353,11 +354,13 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
           let mangaType = 'Manga';
           let synopsis = '';
           let lastReadChapter: string | undefined;
+          let realTitle = name; // Fallback to folder name
           const hasMetadata = mangaContents.includes('metadata.json');
           if (hasMetadata) {
             try {
               const metaContent = await FileSystem.readAsStringAsync(`${itemPath}/metadata.json`);
               const meta = JSON.parse(metaContent);
+              if (meta.title) realTitle = meta.title;
               if (meta.mangaType) mangaType = meta.mangaType;
               if (meta.synopsis) synopsis = meta.synopsis;
               if (meta.lastReadChapter) lastReadChapter = meta.lastReadChapter;
@@ -368,7 +371,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
 
           libraryItems.push({
             id: `local-${name}-${Date.now()}`,
-            mangaTitle: name,
+            mangaTitle: realTitle,
             coverUrl: coverUri || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
             chaptersCount: chaptersCount,
             downloadDate: 'Local',
@@ -906,6 +909,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       downloadStateRef.current[id] = 'completed';
       updateProgress({ status: 'completed', speed: '0.0 MB/s', eta: '0s' });
       addLog(`[SUCESSO] Todos os capítulos baixados com sucesso!`);
+      
+      // Force library scan to update localLibrary instantly
+      scanLibrary();
 
       let finalMangaTitle = '';
       let finalCoverUrl = '';
