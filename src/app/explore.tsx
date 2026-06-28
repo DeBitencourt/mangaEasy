@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Platform,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -17,10 +18,12 @@ import { BottomTabInset, Spacing } from '@/constants/theme';
 import { useManga, HistoryItem } from '@/context/manga-context';
 import { useTheme } from '@/hooks/use-theme';
 import { useFocusEffect } from 'expo-router';
+import { toggleFavoriteLocal, getActiveFavoritesLocal } from '@/utils/database';
 
 // Import separated components and styles
 import MangaReaderModal from '@/components/manga-reader-modal';
 import LocalMangaDetailsModal from '@/components/local-manga-details-modal';
+import SyncSettingsModal from '@/components/sync-settings-modal';
 import { createSharedStyles } from '@/styles/shared.styles';
 import { createLibraryStyles } from '@/styles/library.styles';
 
@@ -50,14 +53,52 @@ export default function LibraryScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteSuccess, setShowDeleteSuccess] = useState(false);
 
+  // Sync Modal State
+  const [isSyncOpen, setIsSyncOpen] = useState(false);
+
+  // Status Toast State
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' }>({
+    text: '',
+    type: 'success',
+  });
+
+  const showStatus = (text: string, type: 'success' | 'error') => {
+    setStatusMessage({ text, type });
+    setTimeout(() => {
+      setStatusMessage({ text: '', type: 'success' });
+    }, 3000);
+  };
+
   // Library search
   const [librarySearch, setLibrarySearch] = useState('');
+
+  // Favorites state
+  const [favoriteTitles, setFavoriteTitles] = useState<Set<string>>(new Set());
+
+  const loadFavorites = useCallback(async () => {
+    try {
+      const activeFavs = await getActiveFavoritesLocal();
+      setFavoriteTitles(new Set(activeFavs.map(f => f.title.toLowerCase())));
+    } catch (err) {
+      console.error('Erro ao buscar favoritos na biblioteca:', err);
+    }
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
       scanLibrary();
-    }, [scanLibrary])
+      loadFavorites();
+    }, [scanLibrary, loadFavorites])
   );
+
+  const handleToggleFavorite = async (title: string, coverUrl: string | null) => {
+    try {
+      await toggleFavoriteLocal(title, coverUrl);
+      await loadFavorites();
+    } catch (err) {
+      console.error('Erro ao favoritar/desfavoritar:', err);
+    }
+  };
 
   const openLocalDetails = (item: HistoryItem) => {
     setSelectedManga(item);
@@ -101,16 +142,42 @@ export default function LibraryScreen() {
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={loadingLibrary}
+              onRefresh={scanLibrary}
+              tintColor={theme.accent}
+              colors={[theme.accent]}
+            />
+          }>
           
           {/* Header */}
-          <ThemedView style={styles.header}>
-            <ThemedText type="subtitle" style={styles.title}>
-              Biblioteca
-            </ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              Gerencie seus downloads concluídos e leia localmente offline
-            </ThemedText>
+          <ThemedView style={[styles.header, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+            <View style={{ flex: 1 }}>
+              <ThemedText type="subtitle" style={styles.title}>
+                Biblioteca
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">
+                Gerencie seus downloads concluídos e leia localmente offline
+              </ThemedText>
+            </View>
+            <Pressable
+              onPress={() => setIsSyncOpen(true)}
+              style={({ pressed }) => [
+                {
+                  padding: 8,
+                  borderRadius: 20,
+                  backgroundColor: theme.backgroundElement,
+                  borderWidth: 0.5,
+                  borderColor: theme.backgroundSelected,
+                  opacity: pressed ? 0.8 : 1,
+                  marginLeft: Spacing.two,
+                }
+              ]}
+            >
+              <SymbolView name="arrow.triangle.2.circlepath" size={16} tintColor={theme.accent} />
+            </Pressable>
           </ThemedView>
 
           {/* History / Completed Downloads */}
@@ -122,7 +189,7 @@ export default function LibraryScreen() {
               </ThemedText>
             </View>
 
-            {loadingLibrary ? (
+            {loadingLibrary && localLibrary.length === 0 ? (
               <View style={{ padding: Spacing.four, alignItems: 'center' }}>
                 <ActivityIndicator size="large" color={theme.accent} />
                 <ThemedText type="small" themeColor="textSecondary" style={{ marginTop: Spacing.two }}>
@@ -150,55 +217,76 @@ export default function LibraryScreen() {
                   </View>
                 )}
 
-                {localLibrary
-                  .filter(item =>
-                    item.mangaTitle.toLowerCase().includes(librarySearch.toLowerCase())
-                  )
-                  .map((item) => (
-                    <Pressable
-                      key={item.id}
-                      onPress={() => openLocalDetails(item)}
-                      style={({ pressed }) => [
-                        styles.historyCard,
-                        {
-                          backgroundColor: theme.backgroundElement,
-                          opacity: pressed ? 0.95 : 1,
-                        }
-                      ]}>
-                      <Image
-                        source={{ uri: item.coverUrl }}
-                        style={styles.historyImage}
-                        contentFit="cover"
-                      />
-                      <View style={styles.historyInfo}>
-                        <ThemedText type="smallBold" numberOfLines={1}>
-                          {item.mangaTitle}
-                        </ThemedText>
-
-                        <View style={styles.historyFooter}>
-                          <ThemedText type="code" themeColor="textSecondary">
-                            {item.chaptersCount} cap. {item.chaptersCount === 1 ? 'baixado' : 'baixados'}
-                          </ThemedText>
-                        </View>
-                      </View>
-
-                      <View style={{ flexDirection: 'row', gap: Spacing.one }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                  {localLibrary
+                    .filter(item =>
+                      item.mangaTitle.toLowerCase().includes(librarySearch.toLowerCase())
+                    )
+                    .map((item) => {
+                      const isFav = favoriteTitles.has(item.mangaTitle.toLowerCase());
+                      return (
                         <Pressable
-                          onPress={() => confirmDelete(item)}
+                          key={item.id}
+                          onPress={() => openLocalDetails(item)}
                           style={({ pressed }) => [
-                            styles.historyReadBtn,
                             {
-                              borderColor: '#f44336',
-                              shadowColor: '#f44336',
-                              backgroundColor: 'rgba(244, 67, 54, 0.05)',
-                              opacity: pressed ? 0.7 : 1,
-                            },
+                              width: '31.3%',
+                              aspectRatio: 2/3,
+                              borderRadius: 8,
+                              overflow: 'hidden',
+                              position: 'relative',
+                              marginBottom: 6,
+                              backgroundColor: theme.backgroundElement,
+                              borderWidth: 0.5,
+                              borderColor: 'rgba(255, 255, 255, 0.05)',
+                              opacity: pressed ? 0.9 : 1,
+                            }
                           ]}>
-                          <SymbolView name="trash" size={12} tintColor="#f44336" />
+                          <Image
+                            source={{ uri: item.coverUrl }}
+                            style={{ width: '100%', height: '100%' }}
+                            contentFit="cover"
+                          />
+                          
+                          {/* Star overlay button */}
+                          <Pressable
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleToggleFavorite(item.mangaTitle, item.coverUrl);
+                            }}
+                            style={{
+                              position: 'absolute',
+                              top: 6,
+                              right: 6,
+                              backgroundColor: 'rgba(0,0,0,0.6)',
+                              borderRadius: 12,
+                              padding: 4,
+                              zIndex: 10,
+                            }}>
+                            <SymbolView
+                              name={isFav ? 'star.fill' : 'star'}
+                              size={14}
+                              tintColor={isFav ? '#FFD700' : '#FFF'}
+                            />
+                          </Pressable>
+
+                          {/* Title overlay at the bottom */}
+                          <View style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            padding: 4,
+                          }}>
+                            <ThemedText type="code" numberOfLines={1} style={{ fontSize: 9, color: '#FFF', textAlign: 'center' }}>
+                              {item.mangaTitle}
+                            </ThemedText>
+                          </View>
                         </Pressable>
-                      </View>
-                    </Pressable>
-                  ))}
+                      );
+                    })}
+                </View>
 
                 {/* No results from search */}
                 {localLibrary.length > 0 &&
@@ -251,6 +339,7 @@ export default function LibraryScreen() {
         onClose={() => setIsLocalDetailsOpen(false)}
         manga={selectedManga}
         onOpenReader={handleOpenReaderFromDetails}
+        onDelete={confirmDelete}
       />
 
       {/* Custom Delete Confirmation Modal */}
@@ -332,6 +421,34 @@ export default function LibraryScreen() {
           </ThemedView>
         </View>
       </Modal>
+      {/* Sync Settings Modal */}
+      <SyncSettingsModal
+        isOpen={isSyncOpen}
+        onClose={() => {
+          setIsSyncOpen(false);
+          scanLibrary();
+          loadFavorites();
+        }}
+        onShowToast={showStatus}
+      />
+
+      {/* Status Toast Banner */}
+      {statusMessage.text !== '' && (
+        <View
+          style={[
+            sharedStyles.statusBanner,
+            { backgroundColor: statusMessage.type === 'success' ? '#2e7d32' : '#c62828', zIndex: 9999 },
+          ]}>
+          <SymbolView
+            name={statusMessage.type === 'success' ? 'checkmark.circle' : 'exclamationmark.triangle'}
+            size={16}
+            tintColor="#fff"
+          />
+          <ThemedText type="smallBold" style={sharedStyles.statusText}>
+            {statusMessage.text}
+          </ThemedText>
+        </View>
+      )}
     </ThemedView>
   );
 }

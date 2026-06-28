@@ -21,8 +21,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { useManga } from '@/context/manga-context';
 import * as FileSystem from 'expo-file-system/legacy';
 import { StatusBar } from 'expo-status-bar';
-
 import * as NavigationBar from 'expo-navigation-bar';
+import { addReadingHistoryLocal, saveReadingProgressLocal, getChapterProgressLocal } from '@/utils/database';
 
 
 
@@ -145,6 +145,22 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const [showHeader, setShowHeader] = useState(true);
   const lastOffsetY = useRef(0);
   const headerOpacity = useRef(new Animated.Value(1)).current;
+
+  // Reading progress state
+  const [currentPageIdx, setCurrentPageIdx] = useState(0);
+
+  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
+    if (viewableItems && viewableItems.length > 0) {
+      const firstVisibleItem = viewableItems[0];
+      if (firstVisibleItem.index !== null && firstVisibleItem.index !== undefined) {
+        setCurrentPageIdx(firstVisibleItem.index);
+      }
+    }
+  }).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+  }).current;
 
   // Scroll to top when chapter changes
   useEffect(() => {
@@ -290,15 +306,16 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
     }
   };
 
-  const loadChapterPages = async (mangaPath: string, chapterFolderName: string, displayTitle?: string) => {
-    const pathSegments = mangaPath.split(/[/\\]/);
-    const lastSegment = pathSegments[pathSegments.length - 1];
-    const isDirect = !chapterFolderName || chapterFolderName === lastSegment;
-
-    setCurrentChapter(displayTitle || chapterFolderName || manga?.mangaTitle || 'Capítulo Único');
+    const chapTitle = displayTitle || chapterFolderName || manga?.mangaTitle || 'Capítulo Único';
+    setCurrentChapter(chapTitle);
     setLoadingPages(true);
     setChapterPages([]);
     setShowChapterSelector(false);
+    setCurrentPageIdx(0);
+
+    if (manga) {
+      addReadingHistoryLocal(manga.mangaTitle, chapTitle).catch(console.error);
+    }
 
     if (Platform.OS === 'web') {
       // Mock pages on web
@@ -312,6 +329,25 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
       ];
       setChapterPages(mockImages);
       setLoadingPages(false);
+
+      if (manga) {
+        getChapterProgressLocal(manga.mangaTitle, chapTitle).then((progress) => {
+          if (progress && progress.last_page_read > 1 && progress.last_page_read <= mockImages.length) {
+            setTimeout(() => {
+              if (flatListRef.current) {
+                try {
+                  flatListRef.current.scrollToIndex({
+                    index: progress.last_page_read - 1,
+                    animated: false
+                  });
+                } catch (e) {
+                  console.warn(e);
+                }
+              }
+            }, 150);
+          }
+        }).catch(console.error);
+      }
       return;
     }
 
@@ -341,6 +377,25 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
       // Build absolute URIs for local files
       const fullUris = imageFiles.map(filename => `${chapterPath}/${filename}`);
       setChapterPages(fullUris);
+
+      if (manga) {
+        getChapterProgressLocal(manga.mangaTitle, chapTitle).then((progress) => {
+          if (progress && progress.last_page_read > 1 && progress.last_page_read <= fullUris.length) {
+            setTimeout(() => {
+              if (flatListRef.current) {
+                try {
+                  flatListRef.current.scrollToIndex({
+                    index: progress.last_page_read - 1,
+                    animated: false
+                  });
+                } catch (e) {
+                  console.warn(e);
+                }
+              }
+            }, 150);
+          }
+        }).catch(console.error);
+      }
     } catch (err: any) {
       console.error(err);
       alert(`Erro ao carregar páginas: ${err.message}`);
@@ -379,12 +434,19 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
     lastOffsetY.current = 0;
   }, [isOpen, currentChapter]);
 
-  // Persist last read chapter whenever it changes
+  // Persist last read chapter and current page progress
   useEffect(() => {
     if (manga && currentChapter && !loadingPages) {
       updateLastReadChapter(manga.savePath, currentChapter);
     }
   }, [currentChapter, loadingPages]);
+
+  useEffect(() => {
+    if (manga && currentChapter && chapterPages.length > 0 && !loadingPages) {
+      saveReadingProgressLocal(manga.mangaTitle, currentChapter, currentPageIdx + 1, chapterPages.length)
+        .catch(console.error);
+    }
+  }, [currentPageIdx, currentChapter, chapterPages, loadingPages]);
 
   // Animate header opacity in/out when showHeader state changes
   useEffect(() => {
@@ -562,6 +624,19 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
                   </ThemedText>
                 </View>
               }
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              onScrollToIndexFailed={(info) => {
+                setTimeout(() => {
+                  if (flatListRef.current) {
+                    try {
+                      flatListRef.current.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+                    } catch (e) {
+                      console.warn(e);
+                    }
+                  }
+                }, 100);
+              }}
             />
           )}
         </View>

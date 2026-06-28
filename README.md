@@ -8,7 +8,11 @@ MangaEasy é um aplicativo móvel universal construído em **React Native** com 
 
 ### 🔍 1. Busca Ativa por Título
 - Digite o título do mangá e obtenha os resultados em formato de cards organizados em um grid responsivo de 2 colunas.
-- Seletor de fonte dropdown no canto superior direito para alternar dinamicamente entre diferentes fontes de mangá (ex: `mangaread.org`, `asuracomics.net`, `manganelo.com`).
+### Seletor de Tipo Manual (Manga, Manhwa e Manhua)
+- Um seletor dropdown localizado logo abaixo da *Source* nos detalhes do mangá.
+- Permite que você defina manualmente como a imagem será baixada e processada (forçando a renderização em formato tradicional ou Webtoon/rolagem vertical como Manhwa e Manhua), independente do que for coletado originalmente no scraping.
+
+###  Seletor de fonte dropdown no canto superior direito para alternar dinamicamente entre as fontes suportadas (`mangaread.org` e `asuracomics.net`).
 - Modo de simulação para desenvolvimento Web com dados mockados de títulos populares como *Solo Leveling*, *The Beginning After the End* e *One Piece*.
 
 ### 📖 2. Modal de Detalhes e Seleção de Capítulos
@@ -31,7 +35,7 @@ MangaEasy é um aplicativo móvel universal construído em **React Native** com 
 - Gerenciamento limpo e focado no conteúdo offline do usuário.
 - Botão "Limpar Histórico" para gerenciar o espaço ocupado.
 
-### 📱 5. Leitor estilo Webtoon
+### 📖 5. Leitor estilo Webtoon
 - Leitor vertical em tela cheia com rolagem contínua das páginas salvas localmente.
 - Indicador visual da página atual (`Pág. X / Y`).
 - Navegação rápida no cabeçalho do leitor para ir ao capítulo anterior ou posterior.

@@ -23,7 +23,7 @@ export default function AppTabs() {
       <NativeTabs.Trigger name="downloads">
         <NativeTabs.Trigger.Label>Downloads</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
-          src={require('@/assets/images/tabIcons/explore.png')}
+          src={require('@/assets/images/tabIcons/download.png')}
           renderingMode="template"
         />
       </NativeTabs.Trigger>

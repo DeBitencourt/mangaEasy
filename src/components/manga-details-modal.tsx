@@ -22,6 +22,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { createSharedStyles } from '@/styles/shared.styles';
 import { createDetailsStyles } from '@/styles/details.styles';;
 import * as FileSystem from 'expo-file-system/legacy';
+import { toggleToReadLocal, isToReadLocal } from '@/utils/database';
 
 interface MangaDetailsModalProps {
   isOpen: boolean;
@@ -44,11 +45,15 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
   const [searchChapter, setSearchChapter] = useState('');
   const [sortAscending, setSortAscending] = useState(false);
+  const [selectedType, setSelectedType] = useState<string>(''); // Vazio por padrão
+  const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
 
   // Range selector state
   const [isRangeActive, setIsRangeActive] = useState(false);
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
+
+  const [isToRead, setIsToRead] = useState(false);
 
   // Clear selections when modal opens/closes
   useEffect(() => {
@@ -58,8 +63,37 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
       setSearchChapter('');
       setRangeStart('');
       setRangeEnd('');
+      setSelectedType('');
+      setIsTypeDropdownOpen(false);
     }
   }, [isOpen]);
+
+  // Load To Read status
+  useEffect(() => {
+    const checkToReadStatus = async () => {
+      if (isOpen && mangaDetails) {
+        try {
+          const toReadVal = await isToReadLocal(mangaDetails.title);
+          setIsToRead(toReadVal);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+    checkToReadStatus();
+  }, [isOpen, mangaDetails]);
+
+  const handleToggleToRead = async () => {
+    if (!mangaDetails) return;
+    try {
+      const nextVal = await toggleToReadLocal(mangaDetails.title, mangaDetails.coverUrl);
+      setIsToRead(nextVal);
+      onShowToast(nextVal ? 'Adicionado à lista A Ler!' : 'Removido da lista A Ler.', 'success');
+    } catch (e) {
+      console.error(e);
+      onShowToast('Erro ao atualizar lista A Ler.', 'error');
+    }
+  };
 
   // Set of numeric chapter numbers that are already downloaded locally
   const [downloadedNums, setDownloadedNums] = useState<Set<number>>(new Set());
@@ -156,7 +190,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
       onShowToast('Selecione pelo menos um capítulo para baixar.', 'error');
       return;
     }
-    startDownload(selectedChapters);
+    startDownload(selectedChapters, selectedType || undefined);
     onClose();
     onShowToast('Download iniciado! Acompanhe na aba Downloads.', 'success');
     setSelectedChapters([]);
@@ -228,6 +262,111 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast }: Mang
                         {mangaDetails.source}
                       </ThemedText>
                     </View>
+
+                    {/* To Read (A Ler) Button */}
+                    <Pressable
+                      onPress={handleToggleToRead}
+                      style={({ pressed }) => [
+                        {
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          marginTop: 8,
+                          alignSelf: 'flex-start',
+                          paddingVertical: 4,
+                          paddingHorizontal: 8,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: isToRead ? '#4CAF50' : theme.textSecondary,
+                          backgroundColor: isToRead ? 'rgba(76, 175, 80, 0.08)' : 'transparent',
+                          opacity: pressed ? 0.8 : 1,
+                        }
+                      ]}
+                    >
+                      <SymbolView
+                        name={isToRead ? 'checkmark.circle.fill' : 'plus.circle'}
+                        size={12}
+                        tintColor={isToRead ? '#4CAF50' : theme.textSecondary}
+                      />
+                      <ThemedText
+                        type="code"
+                        style={{
+                          fontSize: 10,
+                          marginLeft: 4,
+                          color: isToRead ? '#4CAF50' : theme.textSecondary,
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        {isToRead ? 'A Ler (Na Lista)' : 'Adicionar A Ler'}
+                      </ThemedText>
+                    </Pressable>
+
+                    {/* Custom Type Override Dropdown */}
+                    {!mangaDetails.source?.toLowerCase().includes('asura') && (
+                      <View style={{ position: 'relative', marginTop: 6, zIndex: 10 }}>
+                        <Pressable
+                          onPress={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: theme.backgroundSelected,
+                            paddingVertical: 4,
+                            paddingHorizontal: 8,
+                            borderRadius: 6,
+                            borderWidth: 0.5,
+                            borderColor: theme.accent,
+                            minWidth: 100,
+                          }}>
+                          <ThemedText type="code" style={{ fontSize: 11, color: theme.text }}>
+                            {selectedType || 'Tipo: Auto'}
+                          </ThemedText>
+                          <SymbolView name="chevron.down" size={8} tintColor={theme.text} style={{ marginLeft: 6 }} />
+                        </Pressable>
+
+                        {isTypeDropdownOpen && (
+                          <ThemedView
+                            type="backgroundElement"
+                            style={{
+                              position: 'absolute',
+                              top: 28,
+                              left: 0,
+                              right: 0,
+                              borderRadius: 6,
+                              borderWidth: 0.5,
+                              borderColor: theme.backgroundSelected,
+                              shadowColor: '#000',
+                              shadowOffset: { width: 0, height: 2 },
+                              shadowOpacity: 0.2,
+                              shadowRadius: 3,
+                              elevation: 4,
+                              zIndex: 1000,
+                            }}>
+                            {['', 'Manga', 'Manhwa', 'Manhua'].map((typeOption) => {
+                              const isOptionSelected = selectedType === typeOption;
+                              return (
+                                <Pressable
+                                  key={typeOption || 'auto'}
+                                  onPress={() => {
+                                    setSelectedType(typeOption);
+                                    setIsTypeDropdownOpen(false);
+                                  }}
+                                  style={{
+                                    paddingVertical: 6,
+                                    paddingHorizontal: 8,
+                                    borderBottomWidth: typeOption === 'Manhua' ? 0 : 0.5,
+                                    borderBottomColor: theme.backgroundSelected,
+                                    backgroundColor: isOptionSelected ? theme.backgroundSelected : undefined,
+                                  }}>
+                                  <ThemedText type="small" style={{ fontSize: 11, color: isOptionSelected ? theme.accent : theme.text }}>
+                                    {typeOption || 'Auto (Padrão)'}
+                                  </ThemedText>
+                                </Pressable>
+                              );
+                            })}
+                          </ThemedView>
+                        )}
+                      </View>
+                    )}
                   </View>
                 </View>
 

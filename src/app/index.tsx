@@ -156,7 +156,7 @@ export default function HomeScreen() {
             {/* Dropdown Menu Overlay */}
             {showSourceSelector && (
               <ThemedView type="backgroundElement" style={styles.dropdownMenu}>
-                {['mangaread.org', 'asuracomics.net', 'manganelo.com'].map((src) => {
+                {['mangaread.org', 'asuracomics.net'].map((src) => {
                   const isSelected = activeSource === src;
                   return (
                     <Pressable
@@ -227,6 +227,7 @@ export default function HomeScreen() {
               onScroll={handleScroll}
               scrollEventThrottle={16}
               onEndReached={() => {
+                console.log('[DEBUG] FlatList onEndReached triggered. searchInput:', searchInput, 'loadingMore:', loadingMore, 'loadingLatest:', loadingLatest);
                 // Only paginate latest updates, not search results
                 if (searchInput.trim().length === 0 && !loadingMore && !loadingLatest) {
                   fetchMoreLatestUpdates();

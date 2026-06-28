@@ -26,9 +26,10 @@ interface LocalMangaDetailsModalProps {
   onClose: () => void;
   manga: HistoryItem | null;
   onOpenReader: (manga: HistoryItem, chapterFolderName: string) => void;
+  onDelete?: (manga: HistoryItem) => void;
 }
 
-export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenReader }: LocalMangaDetailsModalProps) {
+export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenReader, onDelete }: LocalMangaDetailsModalProps) {
   const theme = useTheme();
   const sharedStyles = createSharedStyles(theme);
   const styles = createDetailsStyles(theme);
@@ -140,7 +141,26 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
               <ThemedText type="smallBold" style={styles.modalHeaderTitle} numberOfLines={1}>
                 Biblioteca Local
               </ThemedText>
-              <View style={{ width: 70 }} />
+              {onDelete ? (
+                <Pressable
+                  onPress={() => {
+                    onClose();
+                    onDelete(manga);
+                  }}
+                  style={({ pressed }) => [
+                    {
+                      padding: 6,
+                      borderRadius: 6,
+                      backgroundColor: 'rgba(244, 67, 54, 0.08)',
+                      opacity: pressed ? 0.7 : 1,
+                    }
+                  ]}
+                >
+                  <SymbolView name="trash" size={16} tintColor="#f44336" />
+                </Pressable>
+              ) : (
+                <View style={{ width: 32 }} />
+              )}
             </View>
 
             <ScrollView

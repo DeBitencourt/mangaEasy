@@ -63,7 +63,7 @@ interface MangaContextType {
   scanLibrary: () => Promise<void>;
   deleteManga: (mangaTitle: string, savePath: string) => Promise<void>;
   updateLastReadChapter: (savePath: string, chapterFolder: string) => Promise<void>;
-  startDownload: (chapters: string[]) => void;
+  startDownload: (chapters: string[], overridenType?: string) => void;
   pauseDownload: (id: string) => void;
   resumeDownload: (id: string) => void;
   cancelDownload: (id: string) => void;
@@ -509,12 +509,20 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const startDownload = (chapters: string[]) => {
+  const startDownload = (chapters: string[], overridenType?: string) => {
     if (!mangaDetails || chapters.length === 0) return;
 
     const id = `dl-${Date.now()}`;
     const sortedChapters = [...chapters].reverse(); // download in ascending order (older first)
     
+    let finalMangaType = overridenType || mangaDetails.mangaType || 'Manga';
+    if (
+      mangaDetails.source?.toLowerCase().includes('asura') ||
+      mangaDetails.url?.toLowerCase().includes('asura')
+    ) {
+      finalMangaType = 'Manhwa';
+    }
+
     const newDownload: ActiveDownload = {
       id,
       mangaTitle: mangaDetails.title,
@@ -532,7 +540,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       eta: '--:--',
       logs: [`[INFO] Iniciando download do mangá: ${mangaDetails.title}`, `[INFO] ${sortedChapters.length} capítulos selecionados para download.`],
       chapterUrls: mangaDetails.chapterUrls,
-      mangaType: mangaDetails.mangaType || 'Manga',
+      mangaType: finalMangaType,
       synopsis: mangaDetails.synopsis || '',
     };
 
@@ -545,7 +553,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         title: mangaDetails.title,
         coverUrl: mangaDetails.coverUrl,
         synopsis: mangaDetails.synopsis || '',
-        mangaType: mangaDetails.mangaType || 'Manga',
+        mangaType: finalMangaType,
         chapterUrls: mangaDetails.chapterUrls,
       });
     }
@@ -1182,6 +1190,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   };
 
   const fetchLatestUpdates = async () => {
+    setLoadingMore(false); // Reset pagination loading indicator to prevent stuck state on source change
     setLoadingLatest(true);
     if (Platform.OS === 'web') {
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -1255,7 +1264,17 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     try {
       const { fetchLatestUpdatesReal } = require('@/utils/scraper');
       const results = await fetchLatestUpdatesReal(activeSource, 1);
-      setLatestUpdates(results);
+      
+      // Deduplicate results
+      const unique = [];
+      const seen = new Set();
+      for (const item of results) {
+        if (!seen.has(item.url)) {
+          seen.add(item.url);
+          unique.push(item);
+        }
+      }
+      setLatestUpdates(unique);
       setCurrentLatestPage(1);
     } catch (e: any) {
       console.error('Erro ao buscar últimos lançamentos:', e);
@@ -1267,16 +1286,33 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   const fetchMoreLatestUpdates = async () => {
     if (loadingMore || Platform.OS === 'web') return;
     setLoadingMore(true);
+    console.log('[DEBUG] fetchMoreLatestUpdates called. Current page:', currentLatestPage, 'activeSource:', activeSource);
     try {
       const nextPage = currentLatestPage + 1;
       const { fetchLatestUpdatesReal } = require('@/utils/scraper');
+      console.log('[DEBUG] Fetching page:', nextPage);
       const results = await fetchLatestUpdatesReal(activeSource, nextPage);
+      console.log('[DEBUG] fetchLatestUpdatesReal returned results count:', results.length);
       if (results.length > 0) {
-        setLatestUpdates(prev => [...prev, ...results]);
+        setLatestUpdates(prev => {
+          const combined = [...prev, ...results];
+          const unique = [];
+          const seen = new Set();
+          for (const item of combined) {
+            if (!seen.has(item.url)) {
+              seen.add(item.url);
+              unique.push(item);
+            }
+          }
+          return unique;
+        });
         setCurrentLatestPage(nextPage);
+        console.log('[DEBUG] Successfully appended page:', nextPage, 'New page state set to:', nextPage);
+      } else {
+        console.log('[DEBUG] No results returned for page:', nextPage);
       }
     } catch (e: any) {
-      console.error('Erro ao carregar mais:', e);
+      console.error('[DEBUG] Erro ao carregar mais:', e);
     } finally {
       setLoadingMore(false);
     }
