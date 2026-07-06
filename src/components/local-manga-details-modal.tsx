@@ -297,7 +297,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
 
               {/* Selection Header */}
               <View style={styles.selectionControls}>
-                <ThemedText type="smallBold">
+                <ThemedText type="smallBold" style={{ marginBottom: 10, marginTop: 10 }}>
                   Capítulos Baixados ({localChapters.length})
                 </ThemedText>
               </View>

@@ -406,6 +406,34 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     try {
       const dirInfo = await FileSystem.getInfoAsync(savePath);
       if (dirInfo.exists) {
+        // --- Bug 5: preserve cover before deletion ---
+        try {
+          const coversDir = `${FileSystem.documentDirectory}MangaCovers`;
+          const coversDirInfo = await FileSystem.getInfoAsync(coversDir);
+          if (!coversDirInfo.exists) {
+            await FileSystem.makeDirectoryAsync(coversDir, { intermediates: true });
+          }
+
+          const mangaContents = await FileSystem.readDirectoryAsync(savePath);
+          const coverFile = mangaContents.find((f) => {
+            const lower = f.toLowerCase();
+            return (
+              lower.startsWith('cover.') &&
+              (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp'))
+            );
+          });
+
+          if (coverFile) {
+            const sanitized = mangaTitle.replace(/[\\/:*?"<>|]/g, '_').trim();
+            const ext = coverFile.split('.').pop() || 'jpg';
+            const destPath = `${coversDir}/${sanitized}.${ext}`;
+            await FileSystem.copyAsync({ from: `${savePath}/${coverFile}`, to: destPath });
+          }
+        } catch (coverErr) {
+          console.warn('Não foi possível preservar a capa:', coverErr);
+        }
+        // --- end Bug 5 ---
+
         await FileSystem.deleteAsync(savePath, { idempotent: true });
       }
 

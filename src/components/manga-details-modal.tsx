@@ -23,6 +23,7 @@ import { createSharedStyles } from '@/styles/shared.styles';
 import { createDetailsStyles } from '@/styles/details.styles';;
 import * as FileSystem from 'expo-file-system/legacy';
 import { toggleToReadLocal, isToReadLocal, toggleFavoriteLocal, isFavoriteLocal, getMangaLastReadChapterLocal } from '@/utils/database';
+import OnlineReaderModal from '@/components/online-reader-modal';
 
 interface MangaDetailsModalProps {
   isOpen: boolean;
@@ -56,6 +57,15 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [isToRead, setIsToRead] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [lastReadChapter, setLastReadChapter] = useState<string | null>(null);
+
+  // Online reader state
+  const [onlineReaderChapter, setOnlineReaderChapter] = useState<string | null>(null);
+  const [isOnlineReaderOpen, setIsOnlineReaderOpen] = useState(false);
+
+  const openOnlineReader = (chapterName: string) => {
+    setOnlineReaderChapter(chapterName);
+    setIsOnlineReaderOpen(true);
+  };
 
   // Clear selections when modal opens/closes
   useEffect(() => {
@@ -237,6 +247,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     : filteredChapters;
 
   return (
+    <>
     <Modal
       visible={isOpen}
       animationType="slide"
@@ -599,6 +610,22 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                           }}>
                           {item}
                         </ThemedText>
+
+                        {/* Ler Online button */}
+                        {mangaDetails?.chapterUrls?.[item] && (
+                          <Pressable
+                            onPress={(e) => { e.stopPropagation(); openOnlineReader(item); }}
+                            style={{
+                              marginRight: 6,
+                              padding: 4,
+                              borderRadius: 6,
+                              backgroundColor: 'rgba(79, 195, 247, 0.12)',
+                            }}
+                          >
+                            <SymbolView name="eye.fill" size={13} tintColor="#4fc3f7" />
+                          </Pressable>
+                        )}
+
                         {alreadyDownloaded ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <ThemedText type="code" style={{ fontSize: 9, color: '#4CAF50' }}>
@@ -649,5 +676,22 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
         )}
       </ThemedView>
     </Modal>
+
+    {/* Online Reader Modal – opened when user taps the eye icon on a chapter */}
+    {mangaDetails && (
+      <OnlineReaderModal
+        isOpen={isOnlineReaderOpen}
+        onClose={() => {
+          setIsOnlineReaderOpen(false);
+          setOnlineReaderChapter(null);
+        }}
+        mangaTitle={mangaDetails.title}
+        mangaType={(mangaDetails as any).mangaType}
+        chapters={mangaDetails.chapters}
+        chapterUrls={mangaDetails.chapterUrls || {}}
+        initialChapter={onlineReaderChapter}
+      />
+    )}
+  </>
   );
 }

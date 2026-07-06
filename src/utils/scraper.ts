@@ -576,9 +576,121 @@ export interface SearchResult {
 }
 
 /**
+ * Searches manga on AsuraScan using their API
+ */
+async function searchMangaAsura(query: string): Promise<SearchResult[]> {
+  const origin = 'https://asurascans.com';
+
+  // Asura exposes a search page at /series?name=<query>
+  const searchUrl = `${origin}/series?name=${encodeURIComponent(query)}`;
+
+  try {
+    const html = await fetchHtml(searchUrl);
+    const results: SearchResult[] = [];
+    const titlesSeen = new Set<string>();
+
+    // Try to extract series list from Astro island props first
+    const unwrapAstroProp = (val: any): any => {
+      if (Array.isArray(val)) {
+        if (val.length === 2 && val[0] === 0) return unwrapAstroProp(val[1]);
+        if (val.length === 2 && val[0] === 1) return val[1].map(unwrapAstroProp);
+        return val.map(unwrapAstroProp);
+      }
+      if (typeof val === 'object' && val !== null) {
+        const res: any = {};
+        for (const k in val) res[k] = unwrapAstroProp(val[k]);
+        return res;
+      }
+      return val;
+    };
+
+    const matches = [...html.matchAll(/props="([^"]+)"/g)];
+    for (const match of matches) {
+      try {
+        const decoded = match[1].replace(/&quot;/g, '"');
+        const parsed = JSON.parse(decoded);
+        const unwrapped = unwrapAstroProp(parsed);
+
+        const seriesList = unwrapped.initialSeries || unwrapped.series || [];
+        if (Array.isArray(seriesList) && seriesList.length > 0) {
+          seriesList.forEach((item: any) => {
+            if (!item || !item.title) return;
+            let title = item.title.trim()
+              .replace(/&#39;/g, "'")
+              .replace(/&amp;/g, '&')
+              .replace(/&quot;/g, '"')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>');
+
+            if (titlesSeen.has(title)) return;
+            titlesSeen.add(title);
+
+            const slug = item.slug || '';
+            const urlPath = item.public_url || `/comics/${slug}-fc4c7eba`;
+            const finalUrl = urlPath.startsWith('http') ? urlPath : `${origin}${urlPath}`;
+            const img = item.cover || item.cover_url || item.coverUrl || '';
+
+            const chapters: Array<{ name: string; date: string }> = [];
+            if (Array.isArray(item.latest_chapters)) {
+              item.latest_chapters.slice(0, 2).forEach((ch: any) => {
+                if (ch && ch.number !== undefined) {
+                  chapters.push({ name: `Capítulo ${ch.number}`, date: '' });
+                }
+              });
+            }
+
+            results.push({
+              title: title.replace(/\s+/g, ' '),
+              url: finalUrl,
+              coverUrl: img,
+              chapters: chapters.length > 0 ? chapters : undefined,
+            });
+          });
+          break; // found a valid block, stop
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+    }
+
+    // Fallback: HTML selector for comic links
+    if (results.length === 0) {
+      const root = parse(html);
+      const links = root.querySelectorAll('a[href*="/comics/"]');
+      links.forEach((el) => {
+        const href = el.getAttribute('href');
+        const titleEl = el.querySelector('span, h3, p');
+        const title = titleEl?.textContent?.trim() || el.textContent?.trim() || '';
+        const imgEl = el.querySelector('img');
+        const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+        if (!href || !title || titlesSeen.has(title)) return;
+        titlesSeen.add(title);
+        const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
+        results.push({
+          title: title.replace(/\s+/g, ' '),
+          url: finalUrl,
+          coverUrl: imgUrl,
+        });
+      });
+    }
+
+    return results;
+  } catch (e) {
+    console.warn('Asura search error:', e);
+    return [];
+  }
+}
+
+/**
  * Searches manga on the active source
  */
 export async function searchMangaReal(query: string, source: string): Promise<SearchResult[]> {
+  // Dispatch to source-specific search
+  if (source.includes('asura')) {
+    return searchMangaAsura(query);
+  }
+
+  // --- MangaRead.org search ---
   const origin = `https://www.mangaread.org`;
   const searchUrl = `${origin}/?s=${encodeURIComponent(query)}&post_type=wp-manga`;
 

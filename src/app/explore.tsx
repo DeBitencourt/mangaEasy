@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -19,6 +19,7 @@ import { useManga, HistoryItem } from '@/context/manga-context';
 import { useTheme } from '@/hooks/use-theme';
 import { useFocusEffect } from 'expo-router';
 import { toggleFavoriteLocal, getActiveFavoritesLocal, getToReadListLocal, Favorite, ToReadItem } from '@/utils/database';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Import separated components and styles
 import MangaReaderModal from '@/components/manga-reader-modal';
@@ -27,6 +28,27 @@ import MangaDetailsModal from '@/components/manga-details-modal';
 import SyncSettingsModal from '@/components/sync-settings-modal';
 import { createSharedStyles } from '@/styles/shared.styles';
 import { createLibraryStyles } from '@/styles/library.styles';
+
+// Bug 5: Resolve the best available cover URI for a manga title.
+// Checks the permanent MangaCovers folder first (covers preserved on deletion),
+// then falls back to the provided remote/local URL.
+async function resolveLocalCover(title: string, remoteCoverUrl: string | null | undefined): Promise<string | undefined> {
+  if (Platform.OS === 'web') return remoteCoverUrl || undefined;
+  const sanitized = title.replace(/[\\/:*?"<>|]/g, '_').trim();
+  const coversDir = `${FileSystem.documentDirectory}MangaCovers`;
+  const extensions = ['jpg', 'jpeg', 'png', 'webp'];
+  for (const ext of extensions) {
+    try {
+      const path = `${coversDir}/${sanitized}.${ext}`;
+      const info = await FileSystem.getInfoAsync(path);
+      if (info.exists) return path;
+    } catch { /* ignore */ }
+  }
+  return remoteCoverUrl || undefined;
+}
+
+// Placeholder shown while cover images are loading
+const COVER_PLACEHOLDER = require('../../assets/images/icon.png');
 
 export default function LibraryScreen() {
   const theme = useTheme();
@@ -95,6 +117,9 @@ export default function LibraryScreen() {
   const [toReadList, setToReadList] = useState<ToReadItem[]>([]);
   const [favoriteTitles, setFavoriteTitles] = useState<Set<string>>(new Set());
 
+  // Bug 4 & 5: resolved cover URI map (title.lower -> local URI or remote URL)
+  const [resolvedCovers, setResolvedCovers] = useState<Record<string, string | undefined>>({});
+
   const loadFavoritesAndToRead = useCallback(async () => {
     try {
       const activeFavs = await getActiveFavoritesLocal();
@@ -107,6 +132,29 @@ export default function LibraryScreen() {
       console.error('Erro ao buscar favoritos/a ler na biblioteca:', err);
     }
   }, []);
+
+  // Bug 4 & 5: resolve local cover paths whenever lists or library change
+  useEffect(() => {
+    const allItems = [
+      ...favorites.map(f => ({ title: f.title, url: f.cover_url })),
+      ...toReadList.map(t => ({ title: t.title, url: t.cover_url })),
+    ];
+    if (allItems.length === 0) return;
+
+    let cancelled = false;
+    const resolve = async () => {
+      const map: Record<string, string | undefined> = {};
+      await Promise.all(
+        allItems.map(async ({ title, url }) => {
+          const key = title.toLowerCase();
+          map[key] = await resolveLocalCover(title, url);
+        })
+      );
+      if (!cancelled) setResolvedCovers(map);
+    };
+    resolve();
+    return () => { cancelled = true; };
+  }, [favorites, toReadList]);
 
   useFocusEffect(
     useCallback(() => {
@@ -199,6 +247,17 @@ export default function LibraryScreen() {
   const filteredItems = displayItems.filter(item =>
     item.title.toLowerCase().includes(librarySearch.toLowerCase())
   );
+
+  // Helper: best cover URI for a display item
+  const getCoverUri = (item: { title: string; coverUrl: string | null | undefined; isDownloaded: boolean; originalItem: any }) => {
+    // For downloaded items the coverUrl is already a local file URI
+    if (item.isDownloaded && item.coverUrl && !item.coverUrl.startsWith('http')) {
+      return item.coverUrl;
+    }
+    // For non-downloaded items: prefer preserved local cover, then remote URL
+    const key = item.title.toLowerCase();
+    return resolvedCovers[key] || item.coverUrl || undefined;
+  };
 
   return (
     <ThemedView style={sharedStyles.container}>
@@ -388,9 +447,13 @@ export default function LibraryScreen() {
                             }
                           ]}>
                           <Image
-                            source={{ uri: item.coverUrl || undefined }}
-                            style={{ width: '100%', height: '100%', opacity: item.isDownloaded ? 1 : 0.5 }}
+                            source={{ uri: getCoverUri(item) }}
+                            placeholder={COVER_PLACEHOLDER}
+                            placeholderContentFit="contain"
+                            style={{ width: '100%', height: '100%', opacity: item.isDownloaded ? 1 : 0.7 }}
                             contentFit="cover"
+                            cachePolicy="memory-disk"
+                            recyclingKey={item.id}
                           />
                           
                           {/* Star overlay button */}
