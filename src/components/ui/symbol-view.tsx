@@ -93,6 +93,17 @@ const SYMBOL_MAP: Record<string, string> = {
   'cloud.fill': '☁',
   'icloud': '☁',
   'icloud.fill': '☁',
+  'eye.fill': '👁',
+  'eye': '👁',
+  'eye.slash': '🙈',
+  'eye.slash.fill': '🙈',
+  'wifi': '📶',
+  'wifi.fill': '📶',
+  'wifi.slash': '📵',
+  'network': '🌐',
+  'antenna.radiowaves.left.and.right': '📡',
+  'arrow.up.arrow.down': '↕',
+  'arrow.up.arrow.down.circle.fill': '⇅',
 };
 
 export function SymbolView({ name, size = 16, tintColor, weight, style }: SymbolViewProps) {

@@ -147,9 +147,9 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const flatListRef = React.useRef<FlatList>(null);
   const webtoonScrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
-  const [showHeader, setShowHeader] = useState(true);
+  const [showHeader, setShowHeader] = useState(false);
   const lastOffsetY = useRef(0);
-  const headerOpacity = useRef(new Animated.Value(1)).current;
+  const headerOpacity = useRef(new Animated.Value(0)).current;
 
   // Reading progress state
   const [currentPageIdx, setCurrentPageIdx] = useState(0);
@@ -467,12 +467,12 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const hasNextChapter = currentChapter ? localChapters.indexOf(currentChapter) > 0 : false;
   const hasPrevChapter = currentChapter ? localChapters.indexOf(currentChapter) < localChapters.length - 1 : false;
 
-  // Reset header visibility when opening/closing or changing chapter
+  // Hide header whenever opening or changing chapter – user reveals it by scrolling up
   useEffect(() => {
-    setShowHeader(true);
+    setShowHeader(false);
     Animated.timing(headerOpacity, {
-      toValue: 1,
-      duration: 200,
+      toValue: 0,
+      duration: 0,
       useNativeDriver: true,
     }).start();
     lastOffsetY.current = 0;

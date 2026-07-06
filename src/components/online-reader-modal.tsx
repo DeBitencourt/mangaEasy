@@ -107,9 +107,9 @@ export default function OnlineReaderModal({
   const webtoonScrollRef = useRef<ScrollView>(null);
   const pageHeightsRef = useRef<number[]>([]);
 
-  const [showHeader, setShowHeader] = useState(true);
+  const [showHeader, setShowHeader] = useState(false);
   const lastOffsetY = useRef(0);
-  const headerOpacity = useRef(new Animated.Value(1)).current;
+  const headerOpacity = useRef(new Animated.Value(0)).current;
 
   const [currentPageIdx, setCurrentPageIdx] = useState(0);
 
@@ -215,9 +215,10 @@ export default function OnlineReaderModal({
     }
   }, [isOpen]);
 
+  // Hide header on open/chapter change – user reveals it by scrolling up
   useEffect(() => {
-    setShowHeader(true);
-    Animated.timing(headerOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    setShowHeader(false);
+    Animated.timing(headerOpacity, { toValue: 0, duration: 0, useNativeDriver: true }).start();
     lastOffsetY.current = 0;
   }, [isOpen, currentChapter]);
 
