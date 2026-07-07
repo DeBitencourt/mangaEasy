@@ -581,8 +581,8 @@ export interface SearchResult {
 async function searchMangaAsura(query: string): Promise<SearchResult[]> {
   const origin = 'https://asurascans.com';
 
-  // Asura exposes a search page at /series?name=<query>
-  const searchUrl = `${origin}/series?name=${encodeURIComponent(query)}`;
+  // Asura exposes a search page at /browse?search=<query>
+  const searchUrl = `${origin}/browse?search=${encodeURIComponent(query)}`;
 
   try {
     const html = await fetchHtml(searchUrl);
