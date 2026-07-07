@@ -22,7 +22,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
 import { addReadingHistoryLocal, saveReadingProgressLocal } from '@/utils/database';
-import { fetchChapterImagesReal } from '@/utils/scraper';
+import { fetchChapterImagesReal, fetchNovelTextReal } from '@/utils/scraper';
 import { createReaderStyles } from '@/styles/reader.styles';
 import { Dimensions } from 'react-native';
 
@@ -93,6 +93,11 @@ export default function OnlineReaderModal({
   const theme = useTheme();
   const styles = createReaderStyles(theme);
 
+  const [fontSize, setFontSize] = useState(16);
+  const [fontFamily, setFontFamily] = useState<'serif' | 'sans-serif'>('serif');
+  const [readingTheme, setReadingTheme] = useState<'light' | 'sepia' | 'dark' | 'amoled'>('sepia');
+  const isNovel = mangaType === 'Novel';
+
   const [currentChapter, setCurrentChapter] = useState<string | null>(null);
   const [chapterPages, setChapterPages] = useState<string[]>([]);
   const [loadingPages, setLoadingPages] = useState(false);
@@ -152,11 +157,20 @@ export default function OnlineReaderModal({
 
     if (Platform.OS === 'web') {
       await new Promise(r => setTimeout(r, 600));
-      setChapterPages([
-        'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=800&q=80',
-        'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800&q=80',
-        'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&q=80',
-      ]);
+      if (mangaType === 'Novel') {
+        setChapterPages([
+          'No mundo onde os fortes devoram os fracos, um jovem desperta com um sistema misterioso que lhe permite evoluir infinitamente.',
+          'O vento uivava através das ruínas antigas quando ele deu o primeiro passo em direção ao perigo. A masmorra de rank S estava diante dele, prometendo riquezas ou a morte.',
+          '— Eu não vou voltar atrás agora — ele sussurrou para si mesmo, apertando o cabo da sua espada gasta. Os portões do abismo se abriram lentamente, revelando sombras famintas.',
+          'Este é o início de uma lenda que abalará os céus e a terra.'
+        ]);
+      } else {
+        setChapterPages([
+          'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=800&q=80',
+          'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800&q=80',
+          'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&q=80',
+        ]);
+      }
       setLoadingPages(false);
       return;
     }
@@ -169,15 +183,20 @@ export default function OnlineReaderModal({
     }
 
     try {
-      const images = await fetchChapterImagesReal(url);
-      setChapterPages(images);
+      if (mangaType === 'Novel') {
+        const paragraphs = await fetchNovelTextReal(url);
+        setChapterPages(paragraphs);
+      } else {
+        const images = await fetchChapterImagesReal(url);
+        setChapterPages(images);
+      }
     } catch (err: any) {
       console.error('[OnlineReader] Erro ao carregar capitulo:', err);
       setLoadError(err.message || 'Erro desconhecido ao carregar o capitulo.');
     } finally {
       setLoadingPages(false);
     }
-  }, [mangaTitle, chapterUrls]);
+  }, [mangaTitle, mangaType, chapterUrls]);
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -269,6 +288,17 @@ export default function OnlineReaderModal({
     if (!currentChapter) return;
     const idx = chapters.indexOf(currentChapter);
     if (idx < chapters.length - 1) loadChapter(chapters[idx + 1]);
+  };
+
+  const getThemeStyle = (themeKey: string) => {
+    switch (themeKey) {
+      case 'light': return { background: '#ffffff', text: '#111111' };
+      case 'dark': return { background: '#1a1a1a', text: '#dddddd' };
+      case 'amoled': return { background: '#000000', text: '#e0e0e0' };
+      case 'sepia':
+      default:
+        return { background: '#f7f0e3', text: '#433422' };
+    }
   };
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -376,7 +406,11 @@ export default function OnlineReaderModal({
         )}
 
         {/* Reader Canvas */}
-        <View style={[styles.readerCanvas, StyleSheet.absoluteFillObject]}>
+        <View style={[
+          styles.readerCanvas,
+          StyleSheet.absoluteFillObject,
+          isNovel && { backgroundColor: getThemeStyle(readingTheme).background }
+        ]}>
           {loadingPages ? (
             <View style={styles.readerLoading}>
               <ActivityIndicator size="large" color={theme.accent} />
@@ -400,6 +434,78 @@ export default function OnlineReaderModal({
                 <ThemedText type="smallBold" style={{ color: '#000' }}>Tentar Novamente</ThemedText>
               </Pressable>
             </View>
+          ) : isNovel ? (
+            <ScrollView
+              showsVerticalScrollIndicator={true}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 100 }}
+            >
+              {chapterPages.length === 0 ? (
+                <View style={styles.readerEmpty}>
+                  <SymbolView name="doc.text.fill" size={32} tintColor="#666" />
+                  <ThemedText type="smallBold" style={{ marginTop: Spacing.two, color: '#888' }}>
+                    Nenhum conteúdo de texto encontrado
+                  </ThemedText>
+                </View>
+              ) : (
+                chapterPages.map((paragraph, index) => (
+                  <ThemedText
+                    key={index}
+                    style={{
+                      fontSize,
+                      fontFamily: fontFamily === 'serif' ? (Platform.OS === 'ios' ? 'Georgia' : 'serif') : undefined,
+                      color: getThemeStyle(readingTheme).text,
+                      lineHeight: fontSize * 1.65,
+                      marginBottom: 16,
+                      textAlign: 'justify',
+                    }}
+                  >
+                    {paragraph}
+                  </ThemedText>
+                ))
+              )}
+
+              {chapterPages.length > 0 && (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 40, paddingBottom: 20 }}>
+                  <Pressable
+                    onPress={handlePrevChapter}
+                    disabled={!hasPrevChapter}
+                    style={({ pressed }) => [
+                      {
+                        backgroundColor: getThemeStyle(readingTheme).text + '1A',
+                        borderRadius: 8,
+                        paddingVertical: 10,
+                        paddingHorizontal: 20,
+                        opacity: hasPrevChapter ? (pressed ? 0.6 : 1) : 0.4,
+                      }
+                    ]}
+                  >
+                    <ThemedText type="smallBold" style={{ color: getThemeStyle(readingTheme).text }}>
+                      Capítulo Anterior
+                    </ThemedText>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleNextChapter}
+                    disabled={!hasNextChapter}
+                    style={({ pressed }) => [
+                      {
+                        backgroundColor: getThemeStyle(readingTheme).text + '1A',
+                        borderRadius: 8,
+                        paddingVertical: 10,
+                        paddingHorizontal: 20,
+                        opacity: hasNextChapter ? (pressed ? 0.6 : 1) : 0.4,
+                      }
+                    ]}
+                  >
+                    <ThemedText type="smallBold" style={{ color: getThemeStyle(readingTheme).text }}>
+                      Próximo Capítulo
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              )}
+            </ScrollView>
           ) : viewMode === 'webtoon' ? (
             <ScrollView
               ref={webtoonScrollRef}
@@ -467,6 +573,98 @@ export default function OnlineReaderModal({
             />
           )}
         </View>
+
+        {/* Floating Novel Settings Toolbar */}
+        {isNovel && showHeader && (
+          <Animated.View
+            style={{
+              position: 'absolute',
+              bottom: 24,
+              left: 20,
+              right: 20,
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              borderRadius: 16,
+              padding: 12,
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              zIndex: 100,
+              opacity: headerOpacity,
+            }}
+          >
+            {/* Font Family Switcher */}
+            <Pressable
+              onPress={() => setFontFamily(prev => prev === 'serif' ? 'sans-serif' : 'serif')}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.1)',
+                paddingVertical: 6,
+                paddingHorizontal: 12,
+                borderRadius: 8,
+              }}
+            >
+              <ThemedText type="smallBold" style={{ color: '#fff', fontSize: 11 }}>
+                {fontFamily === 'serif' ? 'Serif' : 'Sans'}
+              </ThemedText>
+            </Pressable>
+
+            {/* Font Size Selector */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Pressable
+                onPress={() => setFontSize(prev => Math.max(12, prev - 1))}
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ThemedText type="smallBold" style={{ color: '#fff' }}>A-</ThemedText>
+              </Pressable>
+              <ThemedText type="code" style={{ color: '#fff', fontSize: 12 }}>{fontSize}px</ThemedText>
+              <Pressable
+                onPress={() => setFontSize(prev => Math.min(28, prev + 1))}
+                style={{
+                  backgroundColor: 'rgba(255,255,255,0.1)',
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ThemedText type="smallBold" style={{ color: '#fff' }}>A+</ThemedText>
+              </Pressable>
+            </View>
+
+            {/* Theme Cycle Selector */}
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              {['light', 'sepia', 'dark', 'amoled'].map((tKey) => {
+                const isSelected = readingTheme === tKey;
+                let circleBg = '#ffffff';
+                if (tKey === 'sepia') circleBg = '#f7f0e3';
+                if (tKey === 'dark') circleBg = '#333333';
+                if (tKey === 'amoled') circleBg = '#000000';
+                
+                return (
+                  <Pressable
+                    key={tKey}
+                    onPress={() => setReadingTheme(tKey as any)}
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 12,
+                      backgroundColor: circleBg,
+                      borderWidth: isSelected ? 2 : 0.5,
+                      borderColor: isSelected ? theme.accent : '#666',
+                    }}
+                  />
+                );
+              })}
+            </View>
+          </Animated.View>
+        )}
       </ThemedView>
     </Modal>
   );

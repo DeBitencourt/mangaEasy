@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { fetchMangaDetailsReal, fetchChapterImagesReal, normalizeMangaUrl, SearchResult } from '@/utils/scraper';
+import { fetchMangaDetailsReal, fetchChapterImagesReal, fetchNovelTextReal, normalizeMangaUrl, SearchResult } from '@/utils/scraper';
 
 export interface ActiveDownload {
   id: string;
@@ -527,14 +527,40 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     try {
       const normalizedUrl = normalizeMangaUrl(url);
       const scraped = await fetchMangaDetailsReal(normalizedUrl, activeSource);
+      
+      let alternativeUrl = scraped.alternativeUrl;
+      let alternativeSource = scraped.alternativeSource;
+      let alternativeChaptersCount = scraped.alternativeChaptersCount;
+
+      if (!alternativeUrl && mangaDetails) {
+        const prevTitle = mangaDetails.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const newTitle = scraped.title.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (prevTitle === newTitle) {
+          alternativeUrl = mangaDetails.url;
+          alternativeSource = mangaDetails.url.includes('novellive.app') ? 'Novel Live' : 'Novel Buddy';
+          alternativeChaptersCount = mangaDetails.chapters.length;
+        }
+      }
+
       setMangaDetails({
         ...scraped,
+        alternativeUrl,
+        alternativeSource,
+        alternativeChaptersCount,
         source: activeSource,
         url: normalizedUrl,
       });
-    } catch (e: any) {
+        } catch (e: any) {
       console.error(e);
-      throw new Error(`Erro ao buscar detalhes do mangá: ${e.message || e}`);
+      const errorMsg = e.message || String(e);
+      if (errorMsg.includes('não está disponível nas fontes de leitura')) {
+        if (Platform.OS === 'web') {
+          alert(errorMsg);
+        } else {
+          Alert.alert('Novel Indisponível', errorMsg);
+        }
+      }
+      throw new Error(errorMsg);
     } finally {
       setLoadingDetails(false);
     }
@@ -837,6 +863,56 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
+        const isNovel = metaMangaType === 'Novel';
+        const formattedChapterFolder = formatChapterFolder(chapterTitle);
+        const targetDir = `${mangaDir}/${formattedChapterFolder}`;
+
+        try {
+          await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
+        } catch (err: any) {
+          addLog(`[ERRO] Falha ao criar diretório local: ${err.message}`);
+          updateProgress({ status: 'failed' });
+          return;
+        }
+
+        if (isNovel) {
+          addLog(`[INFO] Buscando texto para ${chapterTitle}...`);
+          try {
+            const paragraphs = await fetchNovelTextReal(chapterUrl);
+            addLog(`[INFO] Encontrados ${paragraphs.length} parágrafos para ${chapterTitle}.`);
+            
+            // Save chapter.json
+            const chapterData = {
+              title: chapterTitle,
+              url: chapterUrl,
+              paragraphs,
+            };
+            await FileSystem.writeAsStringAsync(
+              `${targetDir}/chapter.json`,
+              JSON.stringify(chapterData, null, 2)
+            );
+            addLog(`[SUCESSO] Conteúdo do capítulo salvo localmente.`);
+            
+            const overallPct = Math.round(((cIdx + 1) / chapters.length) * 100);
+            updateProgress({
+              currentChapterIndex: cIdx,
+              currentChapterTitle: chapterTitle,
+              chapterProgress: 100,
+              currentPage: 1,
+              totalPages: 1,
+              totalProgress: overallPct,
+            });
+            continue; // Next chapter!
+          } catch (err: any) {
+            if (downloadStateRef.current[id] === 'paused' || downloadStateRef.current[id] === 'cancelled') {
+              return;
+            }
+            addLog(`[ERRO] Falha ao obter texto do capítulo ${chapterTitle}: ${err.message || err}`);
+            updateProgress({ status: 'failed' });
+            return;
+          }
+        }
+
         addLog(`[INFO] Buscando páginas para ${chapterTitle}...`);
         
         let imageUrls: string[] = [];
@@ -848,17 +924,6 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           addLog(`[ERRO] Falha ao obter páginas do capítulo ${chapterTitle}: ${err.message || err}`);
-          updateProgress({ status: 'failed' });
-          return;
-        }
-
-        const formattedChapterFolder = formatChapterFolder(chapterTitle);
-        const targetDir = `${mangaDir}/${formattedChapterFolder}`;
-
-        try {
-          await FileSystem.makeDirectoryAsync(targetDir, { intermediates: true });
-        } catch (err: any) {
-          addLog(`[ERRO] Falha ao criar diretório local: ${err.message}`);
           updateProgress({ status: 'failed' });
           return;
         }

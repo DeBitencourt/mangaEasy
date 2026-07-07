@@ -7,6 +7,9 @@ export interface ScrapedManga {
   chapters: string[];
   chapterUrls: Record<string, string>;
   mangaType?: string;
+  alternativeUrl?: string;
+  alternativeSource?: string;
+  alternativeChaptersCount?: number;
 }
 
 const DEFAULT_HEADERS = {
@@ -250,6 +253,146 @@ function parseChapterLinks(html: string, baseUrl: string): { titles: string[]; u
  */
 export async function fetchMangaDetailsReal(url: string, source: string): Promise<ScrapedManga> {
   const normalizedUrl = normalizeMangaUrl(url);
+
+  if (normalizedUrl.includes('webnovel.com')) {
+    const html = await fetchHtml(normalizedUrl);
+    const root = parse(html);
+    let title = root.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
+    if (!title) {
+      title = root.querySelector('h1')?.textContent?.trim() || root.querySelector('title')?.textContent?.trim() || '';
+    }
+    title = title.split(' - ')[0].split(' | ')[0].trim();
+    
+    const coverUrl = root.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
+    const synopsis = root.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
+    
+    if (!title) {
+      throw new Error('Não foi possível obter o título da novel a partir do WebNovel.');
+    }
+    return fetchWebNovelConsolidated(title, coverUrl, synopsis);
+  }
+
+  const isNovelLive = normalizedUrl.includes('novellive.app');
+  const isNovelBuddy = normalizedUrl.includes('novelbuddy.com');
+
+  if (isNovelLive || isNovelBuddy) {
+    const html = await fetchHtml(normalizedUrl);
+    const root = parse(html);
+    const origin = new URL(normalizedUrl).origin;
+
+    let title = '';
+    const ogTitle = root.querySelector('meta[property="og:title"]')?.getAttribute('content');
+    if (ogTitle) {
+      title = ogTitle.split(' - ')[0].split(' | ')[0].trim();
+    }
+    if (!title) {
+      title = root.querySelector('h1, h3.title, title')?.textContent?.split(' - ')[0].split(' | ')[0].trim() || 'Novel Desconhecida';
+    }
+
+    let coverUrl = '';
+    const ogImage = root.querySelector('meta[property="og:image"]')?.getAttribute('content');
+    if (ogImage) coverUrl = normalizeUrl(ogImage, normalizedUrl);
+    if (!coverUrl) {
+      const img = root.querySelector('.book img, .novel-cover img, .book-img img, img.cover, .summary_image img');
+      const src = img?.getAttribute('data-src') || img?.getAttribute('src');
+      if (src) coverUrl = normalizeUrl(src, normalizedUrl);
+    }
+    if (!coverUrl) {
+      coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+    }
+
+    let synopsis = '';
+    const ogDesc = root.querySelector('meta[property="og:description"]')?.getAttribute('content');
+    if (ogDesc) synopsis = ogDesc.trim();
+    if (!synopsis || synopsis.length < 5) {
+      const paragraphs = root.querySelectorAll('.desc-text p, .description p, .synopsis p, .summary p, #description p');
+      synopsis = paragraphs.map(p => p.textContent?.trim()).filter(Boolean).join('\n');
+    }
+    if (!synopsis) {
+      synopsis = 'Nenhuma sinopse disponível para esta novel.';
+    }
+
+    let titles: string[] = [];
+    let urls: Record<string, string> = {};
+
+    if (isNovelLive) {
+      const anchors = root.querySelectorAll('ul.list-chapter a, .list-chapter a, a[href*="/chapter-"]');
+      anchors.forEach((el, index) => {
+        const href = el.getAttribute('href');
+        const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
+        if (href) {
+          const cleanTitle = cleanChapterTitle(text, index + 1);
+          if (!titles.includes(cleanTitle)) {
+            titles.push(cleanTitle);
+            urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+          }
+        }
+      });
+    } else if (isNovelBuddy) {
+      const match = html.match(/var\s+novelId\s*=\s*(\d+)/) || html.match(/window\.novelId\s*=\s*(\d+)/) || html.match(/data-id=["'](\d+)["']/);
+      if (match && match[1]) {
+        const novelId = match[1];
+        try {
+          const ajaxResponse = await fetch(`${origin}/api/manga/${novelId}/chapters?source=detail`, {
+            method: 'GET',
+            headers: {
+              ...DEFAULT_HEADERS,
+              'Referer': normalizedUrl,
+            },
+          });
+          if (ajaxResponse.ok) {
+            const ajaxHtml = await ajaxResponse.text();
+            const ajaxRoot = parse(ajaxHtml);
+            const anchors = ajaxRoot.querySelectorAll('a');
+            anchors.forEach((el, index) => {
+              const href = el.getAttribute('href');
+              const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
+              if (href) {
+                const cleanTitle = cleanChapterTitle(text, index + 1);
+                if (!titles.includes(cleanTitle)) {
+                  titles.push(cleanTitle);
+                  urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+                }
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('NovelBuddy AJAX error:', e);
+        }
+      }
+
+      if (titles.length === 0) {
+        const anchors = root.querySelectorAll('a[href*="/chapter-"]');
+        anchors.forEach((el, index) => {
+          const href = el.getAttribute('href');
+          const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
+          if (href) {
+            const cleanTitle = cleanChapterTitle(text, index + 1);
+            if (!titles.includes(cleanTitle)) {
+              titles.push(cleanTitle);
+              urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+            }
+          }
+        });
+      }
+    }
+
+    const sortedTitles = [...titles].sort((a, b) => {
+      const numA = parseFloat(a.match(/\d+(?:\.\d+)?/)?.[0] || '0');
+      const numB = parseFloat(b.match(/\d+(?:\.\d+)?/)?.[0] || '0');
+      return numB - numA;
+    });
+
+    return {
+      title,
+      coverUrl,
+      synopsis,
+      chapters: sortedTitles,
+      chapterUrls: urls,
+      mangaType: 'Novel',
+    };
+  }
+
   const html = await fetchHtml(normalizedUrl);
   const root = parse(html);
   const origin = new URL(normalizedUrl).origin;
@@ -573,6 +716,8 @@ export interface SearchResult {
     date: string;
     url?: string;
   }>;
+  alternativeUrl?: string;
+  source?: string;
 }
 
 /**
@@ -688,6 +833,39 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
   // Dispatch to source-specific search
   if (source.includes('asura')) {
     return searchMangaAsura(query);
+  }
+
+  if (source === 'Web Novels') {
+    const [resultsNovellive, resultsNovelbuddy] = await Promise.all([
+      searchMangaNovellive(query),
+      searchMangaNovelbuddy(query),
+    ]);
+    const combined: SearchResult[] = [];
+    const titlesSeen = new Map<string, SearchResult>();
+
+    const normalize = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    resultsNovellive.forEach((item) => {
+      const key = normalize(item.title);
+      titlesSeen.set(key, item);
+      combined.push(item);
+    });
+
+    resultsNovelbuddy.forEach((item) => {
+      const key = normalize(item.title);
+      const existing = titlesSeen.get(key);
+      if (existing) {
+        existing.alternativeUrl = item.url;
+      } else {
+        combined.push(item);
+      }
+    });
+
+    return combined;
+  }
+
+  if (source === 'NovelBuddy') {
+    return searchMangaNovelbuddy(query);
   }
 
   // --- MangaRead.org search ---
@@ -810,6 +988,83 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
  * Fetches latest updates from the source homepage
  */
 export async function fetchLatestUpdatesReal(source: string, page: number = 1): Promise<SearchResult[]> {
+  if (source === 'Web Novels') {
+    const origin = 'https://www.webnovel.com';
+    const html = await fetchHtml(origin);
+    const root = parse(html);
+    const results: SearchResult[] = [];
+    const titlesSeen = new Set<string>();
+
+    const bookLinks = root.querySelectorAll('a[href*="/book/"]');
+    bookLinks.forEach((el) => {
+      const href = el.getAttribute('href') || '';
+      const imgEl = el.querySelector('img');
+      const title = imgEl?.getAttribute('alt')?.trim() || imgEl?.getAttribute('title')?.trim() || el.textContent?.trim() || '';
+      const imgUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
+
+      if (title && href && title.toLowerCase() !== 'read' && !titlesSeen.has(title)) {
+        titlesSeen.add(title);
+        const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
+        results.push({
+          title: title.replace(/\s+/g, ' '),
+          url: finalUrl,
+          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          source: 'Web Novels',
+        });
+      }
+    });
+    return results;
+  }
+
+  if (source === 'NovelBuddy') {
+    const origin = 'https://novelbuddy.com';
+    const html = await fetchHtml(origin);
+    const root = parse(html);
+    const results: SearchResult[] = [];
+    const titlesSeen = new Set<string>();
+
+    const items = root.querySelectorAll('.book-item, .novel-item, .col-md-6');
+    items.forEach((item) => {
+      const titleEl = item.querySelector('.title a, h3 a, a');
+      const title = titleEl?.textContent?.trim() || '';
+      const href = titleEl?.getAttribute('href') || '';
+      const imgEl = item.querySelector('img');
+      const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+
+      if (title && href && !titlesSeen.has(title)) {
+        titlesSeen.add(title);
+        const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
+        results.push({
+          title: title.replace(/\s+/g, ' '),
+          url: finalUrl,
+          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          source: 'NovelBuddy',
+        });
+      }
+    });
+
+    if (results.length === 0) {
+      const links = root.querySelectorAll('a[href*="/novel/"]');
+      links.forEach((el) => {
+        const title = el.textContent?.trim() || '';
+        const href = el.getAttribute('href') || '';
+        const imgEl = el.querySelector('img');
+        const imgUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
+        if (title && href && title.length > 2 && !titlesSeen.has(title)) {
+          titlesSeen.add(title);
+          const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
+          results.push({
+            title: title.replace(/\s+/g, ' '),
+            url: finalUrl,
+            coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+            source: 'NovelBuddy',
+          });
+        }
+      });
+    }
+    return results;
+  }
+
   // --- Asura Scans (HTML Scraper) ---
   if (source.includes('asura')) {
     try {
@@ -1066,4 +1321,216 @@ export async function fetchLatestUpdatesReal(source: string, page: number = 1): 
   });
 
   return results;
+}
+
+/**
+ * Helper search for novellive.app
+ */
+async function searchMangaNovellive(query: string): Promise<SearchResult[]> {
+  const origin = 'https://novellive.app';
+  const url = `${origin}/search?keyword=${encodeURIComponent(query)}`;
+  try {
+    const html = await fetchHtml(url);
+    const root = parse(html);
+    const results: SearchResult[] = [];
+    const items = root.querySelectorAll('.col-novel-list, .novel-item, .row > div');
+    const titlesSeen = new Set<string>();
+
+    items.forEach((item) => {
+      const titleEl = item.querySelector('.novel-title a, h3 a, a[title]');
+      const title = titleEl?.textContent?.trim() || titleEl?.getAttribute('title')?.trim() || '';
+      const href = titleEl?.getAttribute('href') || '';
+      const imgEl = item.querySelector('img');
+      const imgUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
+
+      if (title && href && !titlesSeen.has(title)) {
+        titlesSeen.add(title);
+        results.push({
+          title: title.replace(/\s+/g, ' '),
+          url: href.startsWith('http') ? href : `${origin}${href}`,
+          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          source: 'NovelLive',
+        });
+      }
+    });
+
+    if (results.length === 0) {
+      const anchors = root.querySelectorAll('a[href*="/novel/"]');
+      anchors.forEach(a => {
+        const title = a.textContent?.trim() || a.getAttribute('title')?.trim() || '';
+        const href = a.getAttribute('href') || '';
+        if (title && title.length > 3 && href && !titlesSeen.has(title)) {
+          titlesSeen.add(title);
+          results.push({
+            title: title.replace(/\s+/g, ' '),
+            url: href.startsWith('http') ? href : `${origin}${href}`,
+            coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+            source: 'NovelLive',
+          });
+        }
+      });
+    }
+    return results;
+  } catch (e) {
+    console.warn('Novellive search error:', e);
+    return [];
+  }
+}
+
+/**
+ * Helper search for novelbuddy.com
+ */
+async function searchMangaNovelbuddy(query: string): Promise<SearchResult[]> {
+  const origin = 'https://novelbuddy.com';
+  const url = `${origin}/search?q=${encodeURIComponent(query)}`;
+  try {
+    const html = await fetchHtml(url);
+    const root = parse(html);
+    const results: SearchResult[] = [];
+    const items = root.querySelectorAll('.book-item, .novel-item, .col-md-6');
+    const titlesSeen = new Set<string>();
+
+    items.forEach((item) => {
+      const titleEl = item.querySelector('.title a, h3 a, a');
+      const title = titleEl?.textContent?.trim() || '';
+      const href = titleEl?.getAttribute('href') || '';
+      const imgEl = item.querySelector('img');
+      const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+
+      if (title && href && !titlesSeen.has(title)) {
+        titlesSeen.add(title);
+        results.push({
+          title: title.replace(/\s+/g, ' '),
+          url: href.startsWith('http') ? href : `${origin}${href}`,
+          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+          source: 'NovelBuddy',
+        });
+      }
+    });
+
+    if (results.length === 0) {
+      const anchors = root.querySelectorAll('a[href*="/novel/"]');
+      anchors.forEach(a => {
+        const title = a.textContent?.trim() || '';
+        const href = a.getAttribute('href') || '';
+        if (title && title.length > 3 && href && !titlesSeen.has(title)) {
+          titlesSeen.add(title);
+          results.push({
+            title: title.replace(/\s+/g, ' '),
+            url: href.startsWith('http') ? href : `${origin}${href}`,
+            coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+            source: 'NovelBuddy',
+          });
+        }
+      });
+    }
+    return results;
+  } catch (e) {
+    console.warn('Novelbuddy search error:', e);
+    return [];
+  }
+}
+
+/**
+ * Searches and consolidates Web Novel results from novellive and novelbuddy
+ */
+async function fetchWebNovelConsolidated(title: string, fallbackCover: string, fallbackSynopsis: string): Promise<ScrapedManga> {
+  const [resultsNovellive, resultsNovelbuddy] = await Promise.all([
+    searchMangaNovellive(title),
+    searchMangaNovelbuddy(title)
+  ]);
+
+  const normalize = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const searchKey = normalize(title);
+
+  const matchedLive = resultsNovellive.find(r => normalize(r.title).includes(searchKey) || searchKey.includes(normalize(r.title)));
+  const matchedBuddy = resultsNovelbuddy.find(r => normalize(r.title).includes(searchKey) || searchKey.includes(normalize(r.title)));
+
+  if (!matchedLive && !matchedBuddy) {
+    throw new Error('Esta novel não está disponível nas fontes de leitura gratuita integradas no momento.');
+  }
+
+  let primaryManga: ScrapedManga | null = null;
+  let alternativeUrl = '';
+  let alternativeSource = '';
+  let alternativeChaptersCount = 0;
+
+  if (matchedLive && matchedBuddy) {
+    const [detailLive, detailBuddy] = await Promise.all([
+      fetchMangaDetailsReal(matchedLive.url, 'Web Novels'),
+      fetchMangaDetailsReal(matchedBuddy.url, 'Web Novels')
+    ]);
+    primaryManga = detailLive;
+    alternativeUrl = matchedBuddy.url;
+    alternativeSource = 'Novel Buddy';
+    alternativeChaptersCount = detailBuddy.chapters.length;
+  } else if (matchedLive) {
+    primaryManga = await fetchMangaDetailsReal(matchedLive.url, 'Web Novels');
+  } else if (matchedBuddy) {
+    primaryManga = await fetchMangaDetailsReal(matchedBuddy.url, 'Web Novels');
+  }
+
+  if (!primaryManga) {
+    throw new Error('Esta novel não está disponível nas fontes de leitura gratuita integradas no momento.');
+  }
+
+  return {
+    ...primaryManga,
+    coverUrl: primaryManga.coverUrl || fallbackCover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+    synopsis: primaryManga.synopsis || fallbackSynopsis || 'Nenhuma sinopse disponível.',
+    alternativeUrl,
+    alternativeSource,
+    alternativeChaptersCount,
+    mangaType: 'Novel',
+  };
+}
+
+/**
+ * Fetches novel chapter text content as paragraphs
+ */
+export async function fetchNovelTextReal(chapterUrl: string): Promise<string[]> {
+  const normalizedUrl = normalizeMangaUrl(chapterUrl);
+  const html = await fetchHtml(normalizedUrl);
+  const root = parse(html);
+  const paragraphs: string[] = [];
+
+  const isNovelLive = chapterUrl.includes('novellive.app');
+  const isNovelBuddy = chapterUrl.includes('novelbuddy.com');
+
+  const selectors = isNovelLive
+    ? ['div.txt p', '.chapter-c p', '.reading-content p']
+    : ['#chapter-container p', '.chapter-content p', '.reading-content p', 'div.txt p'];
+
+  let foundP: any[] = [];
+  for (const selector of selectors) {
+    const elements = root.querySelectorAll(selector);
+    if (elements.length > 0) {
+      foundP = elements;
+      break;
+    }
+  }
+
+  if (foundP.length === 0) {
+    const container = root.querySelector('.chapter-content, #chapter-container, div.txt, .reading-content');
+    if (container) {
+      foundP = container.querySelectorAll('p');
+    }
+  }
+
+  if (foundP.length === 0) {
+    foundP = root.querySelectorAll('p');
+  }
+
+  foundP.forEach((p) => {
+    const text = p.textContent?.trim();
+    if (text && text.length > 2) {
+      paragraphs.push(text);
+    }
+  });
+
+  if (paragraphs.length === 0) {
+    throw new Error('Não foi possível extrair o texto do capítulo. O site pode estar protegido ou a estrutura mudou.');
+  }
+
+  return paragraphs;
 }

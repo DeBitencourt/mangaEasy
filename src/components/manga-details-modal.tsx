@@ -40,6 +40,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const {
     mangaDetails,
     loadingDetails,
+    fetchMangaDetails,
     startDownload,
     localLibrary,
   } = useManga();
@@ -49,6 +50,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [sortAscending, setSortAscending] = useState(false);
   const [selectedType, setSelectedType] = useState<string>(''); // Vazio por padrão
   const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
+  const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
 
   // Range selector state
   const [isRangeActive, setIsRangeActive] = useState(false);
@@ -75,6 +77,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setIsRangeActive(false);
       setRangeStart('');
       setRangeEnd('');
+      setIsSourceDropdownOpen(false);
     }
   }, [isOpen]);
 
@@ -383,6 +386,86 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                         </ThemedText>
                       </Pressable>
                     </View>
+
+                    {/* Multi-Source Switcher Dropdown */}
+                    {mangaDetails.alternativeUrl && (
+                      <View style={{ position: 'relative', marginTop: 6, zIndex: 11 }}>
+                        <Pressable
+                          onPress={() => setIsSourceDropdownOpen(!isSourceDropdownOpen)}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: theme.backgroundSelected,
+                            paddingVertical: 4,
+                            paddingHorizontal: 8,
+                            borderRadius: 6,
+                            borderWidth: 0.5,
+                            borderColor: theme.accent,
+                            minWidth: 140,
+                          }}>
+                          <ThemedText type="code" style={{ fontSize: 11, color: theme.text }}>
+                            {`Fonte: ${mangaDetails.url.includes('novellive.app') ? 'Novel Live' : 'Novel Buddy'} (${mangaDetails.chapters.length} Caps)`}
+                          </ThemedText>
+                          <SymbolView name="chevron.down" size={8} tintColor={theme.text} style={{ marginLeft: 6 }} />
+                        </Pressable>
+
+                        {isSourceDropdownOpen && (
+                          <ThemedView
+                            type="backgroundElement"
+                            style={{
+                              position: 'absolute',
+                              top: 28,
+                              left: 0,
+                              right: 0,
+                              borderRadius: 6,
+                              borderWidth: 0.5,
+                              borderColor: theme.backgroundSelected,
+                              shadowColor: '#000',
+                              shadowOffset: { width: 0, height: 2 },
+                              shadowOpacity: 0.2,
+                              shadowRadius: 3,
+                              elevation: 4,
+                              zIndex: 1000,
+                            }}>
+                            {[
+                              {
+                                name: `Novel Live: ${mangaDetails.url.includes('novellive.app') ? mangaDetails.chapters.length : (mangaDetails.alternativeChaptersCount || 0)} Capítulos`,
+                                url: mangaDetails.url.includes('novellive.app') ? mangaDetails.url : mangaDetails.alternativeUrl,
+                                isCurrent: mangaDetails.url.includes('novellive.app'),
+                              },
+                              {
+                                name: `Novel Buddy: ${mangaDetails.url.includes('novelbuddy.com') ? mangaDetails.chapters.length : (mangaDetails.alternativeChaptersCount || 0)} Capítulos`,
+                                url: mangaDetails.url.includes('novelbuddy.com') ? mangaDetails.url : mangaDetails.alternativeUrl,
+                                isCurrent: mangaDetails.url.includes('novelbuddy.com'),
+                              }
+                            ].map((srcOpt) => {
+                              return (
+                                <Pressable
+                                  key={srcOpt.name}
+                                  onPress={async () => {
+                                    setIsSourceDropdownOpen(false);
+                                    if (!srcOpt.isCurrent) {
+                                      await fetchMangaDetails(srcOpt.url);
+                                    }
+                                  }}
+                                  style={{
+                                    paddingVertical: 6,
+                                    paddingHorizontal: 8,
+                                    borderBottomWidth: 0.5,
+                                    borderBottomColor: theme.backgroundSelected,
+                                    backgroundColor: srcOpt.isCurrent ? theme.backgroundSelected : undefined,
+                                  }}>
+                                  <ThemedText type="small" style={{ fontSize: 11, color: srcOpt.isCurrent ? theme.accent : theme.text }}>
+                                    {srcOpt.name} {srcOpt.isCurrent ? '(Ativa)' : ''}
+                                  </ThemedText>
+                                </Pressable>
+                              );
+                            })}
+                          </ThemedView>
+                        )}
+                      </View>
+                    )}
 
                     {/* Custom Type Override Dropdown */}
                     {!mangaDetails.source?.toLowerCase().includes('asura') && (
