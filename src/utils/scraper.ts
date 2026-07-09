@@ -7,9 +7,6 @@ export interface ScrapedManga {
   chapters: string[];
   chapterUrls: Record<string, string>;
   mangaType?: string;
-  alternativeUrl?: string;
-  alternativeSource?: string;
-  alternativeChaptersCount?: number;
 }
 
 const DEFAULT_HEADERS = {
@@ -65,11 +62,15 @@ export function getHighResImageUrl(url: string): string {
   return url.replace(/-\d+x\d+(\.\w+)$/, '$1');
 }
 
+
+
 /**
  * Fetch HTML helper with fake browser headers
  */
 async function fetchHtml(url: string): Promise<string> {
   const targetUrl = normalizeMangaUrl(url);
+
+
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
@@ -254,28 +255,9 @@ function parseChapterLinks(html: string, baseUrl: string): { titles: string[]; u
 export async function fetchMangaDetailsReal(url: string, source: string): Promise<ScrapedManga> {
   const normalizedUrl = normalizeMangaUrl(url);
 
-  if (normalizedUrl.includes('webnovel.com')) {
-    const html = await fetchHtml(normalizedUrl);
-    const root = parse(html);
-    let title = root.querySelector('meta[property="og:title"]')?.getAttribute('content') || '';
-    if (!title) {
-      title = root.querySelector('h1')?.textContent?.trim() || root.querySelector('title')?.textContent?.trim() || '';
-    }
-    title = title.split(' - ')[0].split(' | ')[0].trim();
-    
-    const coverUrl = root.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
-    const synopsis = root.querySelector('meta[property="og:description"]')?.getAttribute('content') || '';
-    
-    if (!title) {
-      throw new Error('Não foi possível obter o título da novel a partir do WebNovel.');
-    }
-    return fetchWebNovelConsolidated(title, coverUrl, synopsis);
-  }
+  const isNovelBuddy = normalizedUrl.includes('novelbuddy.com') || normalizedUrl.includes('novelbuddy.io');
 
-  const isNovelLive = normalizedUrl.includes('novellive.app');
-  const isNovelBuddy = normalizedUrl.includes('novelbuddy.com');
-
-  if (isNovelLive || isNovelBuddy) {
+  if (isNovelBuddy) {
     const html = await fetchHtml(normalizedUrl);
     const root = parse(html);
     const origin = new URL(normalizedUrl).origin;
@@ -315,8 +297,40 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
     let titles: string[] = [];
     let urls: Record<string, string> = {};
 
-    if (isNovelLive) {
-      const anchors = root.querySelectorAll('ul.list-chapter a, .list-chapter a, a[href*="/chapter-"]');
+    const match = html.match(/var\s+novelId\s*=\s*(\d+)/) || html.match(/window\.novelId\s*=\s*(\d+)/) || html.match(/data-id=["'](\d+)["']/);
+    if (match && match[1]) {
+      const novelId = match[1];
+      try {
+        const ajaxResponse = await fetch(`${origin}/api/manga/${novelId}/chapters?source=detail`, {
+          method: 'GET',
+          headers: {
+            ...DEFAULT_HEADERS,
+            'Referer': normalizedUrl,
+          },
+        });
+        if (ajaxResponse.ok) {
+          const ajaxHtml = await ajaxResponse.text();
+          const ajaxRoot = parse(ajaxHtml);
+          const anchors = ajaxRoot.querySelectorAll('a');
+          anchors.forEach((el, index) => {
+            const href = el.getAttribute('href');
+            const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
+            if (href) {
+              const cleanTitle = cleanChapterTitle(text, index + 1);
+              if (!titles.includes(cleanTitle)) {
+                titles.push(cleanTitle);
+                urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('NovelBuddy AJAX error:', e);
+      }
+    }
+
+    if (titles.length === 0) {
+      const anchors = root.querySelectorAll('a[href*="/chapter-"]');
       anchors.forEach((el, index) => {
         const href = el.getAttribute('href');
         const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
@@ -328,53 +342,6 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
           }
         }
       });
-    } else if (isNovelBuddy) {
-      const match = html.match(/var\s+novelId\s*=\s*(\d+)/) || html.match(/window\.novelId\s*=\s*(\d+)/) || html.match(/data-id=["'](\d+)["']/);
-      if (match && match[1]) {
-        const novelId = match[1];
-        try {
-          const ajaxResponse = await fetch(`${origin}/api/manga/${novelId}/chapters?source=detail`, {
-            method: 'GET',
-            headers: {
-              ...DEFAULT_HEADERS,
-              'Referer': normalizedUrl,
-            },
-          });
-          if (ajaxResponse.ok) {
-            const ajaxHtml = await ajaxResponse.text();
-            const ajaxRoot = parse(ajaxHtml);
-            const anchors = ajaxRoot.querySelectorAll('a');
-            anchors.forEach((el, index) => {
-              const href = el.getAttribute('href');
-              const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
-              if (href) {
-                const cleanTitle = cleanChapterTitle(text, index + 1);
-                if (!titles.includes(cleanTitle)) {
-                  titles.push(cleanTitle);
-                  urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
-                }
-              }
-            });
-          }
-        } catch (e) {
-          console.warn('NovelBuddy AJAX error:', e);
-        }
-      }
-
-      if (titles.length === 0) {
-        const anchors = root.querySelectorAll('a[href*="/chapter-"]');
-        anchors.forEach((el, index) => {
-          const href = el.getAttribute('href');
-          const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
-          if (href) {
-            const cleanTitle = cleanChapterTitle(text, index + 1);
-            if (!titles.includes(cleanTitle)) {
-              titles.push(cleanTitle);
-              urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
-            }
-          }
-        });
-      }
     }
 
     const sortedTitles = [...titles].sort((a, b) => {
@@ -835,34 +802,7 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
     return searchMangaAsura(query);
   }
 
-  if (source === 'Web Novels') {
-    const [resultsNovellive, resultsNovelbuddy] = await Promise.all([
-      searchMangaNovellive(query),
-      searchMangaNovelbuddy(query),
-    ]);
-    const combined: SearchResult[] = [];
-    const titlesSeen = new Map<string, SearchResult>();
 
-    const normalize = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    resultsNovellive.forEach((item) => {
-      const key = normalize(item.title);
-      titlesSeen.set(key, item);
-      combined.push(item);
-    });
-
-    resultsNovelbuddy.forEach((item) => {
-      const key = normalize(item.title);
-      const existing = titlesSeen.get(key);
-      if (existing) {
-        existing.alternativeUrl = item.url;
-      } else {
-        combined.push(item);
-      }
-    });
-
-    return combined;
-  }
 
   if (source === 'NovelBuddy') {
     return searchMangaNovelbuddy(query);
@@ -988,81 +928,79 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
  * Fetches latest updates from the source homepage
  */
 export async function fetchLatestUpdatesReal(source: string, page: number = 1): Promise<SearchResult[]> {
-  if (source === 'Web Novels') {
-    const origin = 'https://www.webnovel.com';
-    const html = await fetchHtml(origin);
-    const root = parse(html);
-    const results: SearchResult[] = [];
-    const titlesSeen = new Set<string>();
 
-    const bookLinks = root.querySelectorAll('a[href*="/book/"]');
-    bookLinks.forEach((el) => {
-      const href = el.getAttribute('href') || '';
-      const imgEl = el.querySelector('img');
-      const title = imgEl?.getAttribute('alt')?.trim() || imgEl?.getAttribute('title')?.trim() || el.textContent?.trim() || '';
-      const imgUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
-
-      if (title && href && title.toLowerCase() !== 'read' && !titlesSeen.has(title)) {
-        titlesSeen.add(title);
-        const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
-        results.push({
-          title: title.replace(/\s+/g, ' '),
-          url: finalUrl,
-          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-          source: 'Web Novels',
-        });
-      }
-    });
-    return results;
-  }
 
   if (source === 'NovelBuddy') {
-    const origin = 'https://novelbuddy.com';
-    const html = await fetchHtml(origin);
-    const root = parse(html);
-    const results: SearchResult[] = [];
-    const titlesSeen = new Set<string>();
+    try {
+      const origin = 'https://novelbuddy.com';
+      // Page 1 → /home (has latest section in __NEXT_DATA__)
+      // Page N → /latest?page=N (paginated listing)
+      const pageUrl = page === 1
+        ? `${origin}/home`
+        : `${origin}/latest?page=${page}`;
 
-    const items = root.querySelectorAll('.book-item, .novel-item, .col-md-6');
-    items.forEach((item) => {
-      const titleEl = item.querySelector('.title a, h3 a, a');
-      const title = titleEl?.textContent?.trim() || '';
-      const href = titleEl?.getAttribute('href') || '';
-      const imgEl = item.querySelector('img');
-      const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+      const html = await fetchHtml(pageUrl);
 
-      if (title && href && !titlesSeen.has(title)) {
-        titlesSeen.add(title);
-        const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
-        results.push({
-          title: title.replace(/\s+/g, ' '),
-          url: finalUrl,
-          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-          source: 'NovelBuddy',
-        });
+      // Extract __NEXT_DATA__ JSON embedded by Next.js SSR
+      const nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+      if (!nextDataMatch) {
+        console.warn('[DEBUG] NovelBuddy: __NEXT_DATA__ not found in HTML');
+        return [];
       }
-    });
 
-    if (results.length === 0) {
-      const links = root.querySelectorAll('a[href*="/novel/"]');
-      links.forEach((el) => {
-        const title = el.textContent?.trim() || '';
-        const href = el.getAttribute('href') || '';
-        const imgEl = el.querySelector('img');
-        const imgUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
-        if (title && href && title.length > 2 && !titlesSeen.has(title)) {
-          titlesSeen.add(title);
-          const finalUrl = href.startsWith('http') ? href : `${origin}${href}`;
-          results.push({
-            title: title.replace(/\s+/g, ' '),
-            url: finalUrl,
-            coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-            source: 'NovelBuddy',
+      let nextData: any;
+      try {
+        nextData = JSON.parse(nextDataMatch[1]);
+      } catch (e) {
+        console.warn('[DEBUG] NovelBuddy: failed to parse __NEXT_DATA__ JSON');
+        return [];
+      }
+
+      // Page 1: data is at props.pageProps.latest.items
+      // Page N: data may be at props.pageProps.items or props.pageProps.latest.items
+      const pageProps = nextData?.props?.pageProps || {};
+      const items: any[] =
+        pageProps?.latest?.items ||
+        pageProps?.items ||
+        [];
+
+      if (!Array.isArray(items) || items.length === 0) {
+        console.log('[DEBUG] NovelBuddy: no items found in __NEXT_DATA__ for page', page);
+        return [];
+      }
+
+      return items.map((item: any) => {
+        const novelUrl = item.url
+          ? (item.url.startsWith('http') ? item.url : `${origin}${item.url}`)
+          : `${origin}/${item.slug || item.id}`;
+
+        const coverUrl = item.cover || item.cover_url || item.coverUrl
+          || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+
+        const chapters: Array<{ name: string; date: string; url?: string }> = [];
+        const latestChapters = item.latestChapters || item.latest_chapters || [];
+        if (Array.isArray(latestChapters)) {
+          latestChapters.slice(0, 2).forEach((ch: any) => {
+            const chName = ch.name || (ch.number !== undefined ? `Chapter ${ch.number}` : '');
+            const chDate = ch.date ? new Date(ch.date).toLocaleDateString('pt-BR') : '';
+            const chUrl = ch.url ? (ch.url.startsWith('http') ? ch.url : `${origin}${ch.url}`) : undefined;
+            if (chName) chapters.push({ name: chName, date: chDate, url: chUrl });
           });
         }
+
+        return {
+          title: (item.name || item.title || '').replace(/\s+/g, ' '),
+          url: novelUrl,
+          coverUrl,
+          rating: item.rating ? String(item.rating) : undefined,
+          chapters: chapters.length > 0 ? chapters : undefined,
+          source: 'NovelBuddy',
+        } as SearchResult;
       });
+    } catch (e: any) {
+      console.warn('[DEBUG] NovelBuddy fetch error:', e.message);
+      return [];
     }
-    return results;
   }
 
   // --- Asura Scans (HTML Scraper) ---
@@ -1323,59 +1261,7 @@ export async function fetchLatestUpdatesReal(source: string, page: number = 1): 
   return results;
 }
 
-/**
- * Helper search for novellive.app
- */
-async function searchMangaNovellive(query: string): Promise<SearchResult[]> {
-  const origin = 'https://novellive.app';
-  const url = `${origin}/search?keyword=${encodeURIComponent(query)}`;
-  try {
-    const html = await fetchHtml(url);
-    const root = parse(html);
-    const results: SearchResult[] = [];
-    const items = root.querySelectorAll('.col-novel-list, .novel-item, .row > div');
-    const titlesSeen = new Set<string>();
 
-    items.forEach((item) => {
-      const titleEl = item.querySelector('.novel-title a, h3 a, a[title]');
-      const title = titleEl?.textContent?.trim() || titleEl?.getAttribute('title')?.trim() || '';
-      const href = titleEl?.getAttribute('href') || '';
-      const imgEl = item.querySelector('img');
-      const imgUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src') || '';
-
-      if (title && href && !titlesSeen.has(title)) {
-        titlesSeen.add(title);
-        results.push({
-          title: title.replace(/\s+/g, ' '),
-          url: href.startsWith('http') ? href : `${origin}${href}`,
-          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-          source: 'NovelLive',
-        });
-      }
-    });
-
-    if (results.length === 0) {
-      const anchors = root.querySelectorAll('a[href*="/novel/"]');
-      anchors.forEach(a => {
-        const title = a.textContent?.trim() || a.getAttribute('title')?.trim() || '';
-        const href = a.getAttribute('href') || '';
-        if (title && title.length > 3 && href && !titlesSeen.has(title)) {
-          titlesSeen.add(title);
-          results.push({
-            title: title.replace(/\s+/g, ' '),
-            url: href.startsWith('http') ? href : `${origin}${href}`,
-            coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-            source: 'NovelLive',
-          });
-        }
-      });
-    }
-    return results;
-  } catch (e) {
-    console.warn('Novellive search error:', e);
-    return [];
-  }
-}
 
 /**
  * Helper search for novelbuddy.com
@@ -1385,33 +1271,83 @@ async function searchMangaNovelbuddy(query: string): Promise<SearchResult[]> {
   const url = `${origin}/search?q=${encodeURIComponent(query)}`;
   try {
     const html = await fetchHtml(url);
+    console.log(`[DEBUG] NovelBuddy search html length: ${html.length}`);
     const root = parse(html);
     const results: SearchResult[] = [];
-    const items = root.querySelectorAll('.book-item, .novel-item, .col-md-6');
     const titlesSeen = new Set<string>();
 
-    items.forEach((item) => {
-      const titleEl = item.querySelector('.title a, h3 a, a');
-      const title = titleEl?.textContent?.trim() || '';
-      const href = titleEl?.getAttribute('href') || '';
-      const imgEl = item.querySelector('img');
-      const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+    // 1. Try parsing Next.js dynamic payload in __NEXT_DATA__ script tag
+    const nextDataEl = root.querySelector('script#__NEXT_DATA__, script[id="__NEXT_DATA__"]');
+    if (nextDataEl) {
+      try {
+        const nextData = JSON.parse(nextDataEl.textContent || '{}');
+        const ssrItems = nextData?.props?.pageProps?.ssrItems || [];
+        console.log(`[DEBUG] Found __NEXT_DATA__, ssrItems count: ${ssrItems.length}`);
+        
+        ssrItems.forEach((item: any) => {
+          const title = item.name?.trim() || '';
+          const href = item.url || '';
+          const imgUrl = item.cover || '';
 
-      if (title && href && !titlesSeen.has(title)) {
-        titlesSeen.add(title);
-        results.push({
-          title: title.replace(/\s+/g, ' '),
-          url: href.startsWith('http') ? href : `${origin}${href}`,
-          coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-          source: 'NovelBuddy',
+          if (title && href && !titlesSeen.has(title)) {
+            titlesSeen.add(title);
+            results.push({
+              title: title.replace(/\s+/g, ' '),
+              url: href.startsWith('http') ? href : `${origin}${href}`,
+              coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+              source: 'NovelBuddy',
+            });
+          }
         });
+      } catch (err) {
+        console.warn('Error parsing __NEXT_DATA__ json:', err);
       }
-    });
+    }
+
+    // 2. Fallback to HTML parsing if __NEXT_DATA__ was not found or failed to return items
+    if (results.length === 0) {
+      console.log('[DEBUG] Falling back to HTML selectors parsing for NovelBuddy');
+      const items = root.querySelectorAll('a[title], .book-item, .novel-item, .col-md-6, div.grid > div, .group');
+      const navSlugs = new Set([
+        '/', '/home', '/trending', '/filters', '/search', '/latest', 
+        '/popular', '/hot-chapters', '/hall-of-fame', '/me/history', 
+        '/feed', '/reviews', '/lists', '/discussions', '/login', '/register'
+      ]);
+
+      items.forEach((item) => {
+        let titleEl = item;
+        if (!item.getAttribute('title')) {
+          titleEl = item.querySelector('a[title]') || item;
+        }
+        const title = titleEl.getAttribute('title')?.trim() || titleEl.textContent?.trim() || '';
+        const href = titleEl.getAttribute('href') || '';
+        if (!title || !href) return;
+
+        // Skip menu / navigation links
+        if (navSlugs.has(href) || href.startsWith('/me/') || href.includes('search') || href.includes('home')) {
+          return;
+        }
+
+        const parent = item.parentNode;
+        const imgEl = item.querySelector('img') || parent?.querySelector('img');
+        const imgUrl = imgEl?.getAttribute('data-src') || imgEl?.getAttribute('src') || '';
+
+        if (!titlesSeen.has(title)) {
+          titlesSeen.add(title);
+          results.push({
+            title: title.replace(/\s+/g, ' '),
+            url: href.startsWith('http') ? href : `${origin}${href}`,
+            coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
+            source: 'NovelBuddy',
+          });
+        }
+      });
+    }
 
     if (results.length === 0) {
       const anchors = root.querySelectorAll('a[href*="/novel/"]');
       anchors.forEach(a => {
-        const title = a.textContent?.trim() || '';
+        const title = a.getAttribute('title')?.trim() || a.textContent?.trim() || '';
         const href = a.getAttribute('href') || '';
         if (title && title.length > 3 && href && !titlesSeen.has(title)) {
           titlesSeen.add(title);
@@ -1432,61 +1368,32 @@ async function searchMangaNovelbuddy(query: string): Promise<SearchResult[]> {
 }
 
 /**
- * Searches and consolidates Web Novel results from novellive and novelbuddy
+ * Helper to match titles robustly across different translations/sources
  */
-async function fetchWebNovelConsolidated(title: string, fallbackCover: string, fallbackSynopsis: string): Promise<ScrapedManga> {
-  const [resultsNovellive, resultsNovelbuddy] = await Promise.all([
-    searchMangaNovellive(title),
-    searchMangaNovelbuddy(title)
-  ]);
+function isTitleMatch(titleA: string, titleB: string): boolean {
+  const normA = titleA.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+  const normB = titleB.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
 
-  const normalize = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const searchKey = normalize(title);
+  if (normA.length === 0 || normB.length === 0) return false;
 
-  const matchedLive = resultsNovellive.find(r => normalize(r.title).includes(searchKey) || searchKey.includes(normalize(r.title)));
-  const matchedBuddy = resultsNovelbuddy.find(r => normalize(r.title).includes(searchKey) || searchKey.includes(normalize(r.title)));
+  const fillers = new Set(['the', 'of', 'a', 'an', 'to', 'in', 'and', 'for', 'on', 'with', 'at', 'by']);
+  const wordsA = normA.filter(w => !fillers.has(w));
+  const wordsB = normB.filter(w => !fillers.has(w));
 
-  if (!matchedLive && !matchedBuddy) {
-    throw new Error('Esta novel não está disponível nas fontes de leitura gratuita integradas no momento.');
-  }
+  const finalA = wordsA.length > 0 ? wordsA : normA;
+  const finalB = wordsB.length > 0 ? wordsB : normB;
 
-  let primaryManga: ScrapedManga | null = null;
-  let alternativeUrl = '';
-  let alternativeSource = '';
-  let alternativeChaptersCount = 0;
+  const setA = new Set(finalA);
+  const intersection = finalB.filter(w => setA.has(w));
 
-  if (matchedLive && matchedBuddy) {
-    const [detailLive, detailBuddy] = await Promise.all([
-      fetchMangaDetailsReal(matchedLive.url, 'Web Novels'),
-      fetchMangaDetailsReal(matchedBuddy.url, 'Web Novels')
-    ]);
-    primaryManga = detailLive;
-    alternativeUrl = matchedBuddy.url;
-    alternativeSource = 'Novel Buddy';
-    alternativeChaptersCount = detailBuddy.chapters.length;
-  } else if (matchedLive) {
-    primaryManga = await fetchMangaDetailsReal(matchedLive.url, 'Web Novels');
-  } else if (matchedBuddy) {
-    primaryManga = await fetchMangaDetailsReal(matchedBuddy.url, 'Web Novels');
-  }
+  const minLength = Math.min(finalA.length, finalB.length);
+  const matchRatio = intersection.length / minLength;
 
-  if (!primaryManga) {
-    throw new Error('Esta novel não está disponível nas fontes de leitura gratuita integradas no momento.');
-  }
-
-  return {
-    ...primaryManga,
-    coverUrl: primaryManga.coverUrl || fallbackCover || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-    synopsis: primaryManga.synopsis || fallbackSynopsis || 'Nenhuma sinopse disponível.',
-    alternativeUrl,
-    alternativeSource,
-    alternativeChaptersCount,
-    mangaType: 'Novel',
-  };
+  return matchRatio >= 0.7;
 }
 
 /**
- * Fetches novel chapter text content as paragraphs
+ * Fetches novel chapter text content as paragraphs from NovelBuddy
  */
 export async function fetchNovelTextReal(chapterUrl: string): Promise<string[]> {
   const normalizedUrl = normalizeMangaUrl(chapterUrl);
@@ -1494,12 +1401,7 @@ export async function fetchNovelTextReal(chapterUrl: string): Promise<string[]> 
   const root = parse(html);
   const paragraphs: string[] = [];
 
-  const isNovelLive = chapterUrl.includes('novellive.app');
-  const isNovelBuddy = chapterUrl.includes('novelbuddy.com');
-
-  const selectors = isNovelLive
-    ? ['div.txt p', '.chapter-c p', '.reading-content p']
-    : ['#chapter-container p', '.chapter-content p', '.reading-content p', 'div.txt p'];
+  const selectors = ['#chapter-container p', '.chapter-content p', '.reading-content p', 'div.themed-scroll p', 'div.txt p'];
 
   let foundP: any[] = [];
   for (const selector of selectors) {
@@ -1533,4 +1435,68 @@ export async function fetchNovelTextReal(chapterUrl: string): Promise<string[]> 
   }
 
   return paragraphs;
+}
+
+/**
+ * Fetches trending novels from NovelBuddy's home page.
+ * The "Trending Manga" section is rendered in plain HTML markup (not in __NEXT_DATA__).
+ * Each trending entry is an <a> link with an <img> cover and a <p> title, inside a grid.
+ */
+export async function fetchNovelBuddyTrending(): Promise<SearchResult[]> {
+  try {
+    const origin = 'https://novelbuddy.com';
+    const html = await fetchHtml(`${origin}/home`);
+    const root = parse(html);
+
+    // The trending section contains <a> elements that each have:
+    // - href="/slug"
+    // - img src="https://static.novelbuddy.com/covers/slug.png"
+    // - p with the title text
+    // They are inside a grid that immediately follows the "Trending period" tablist.
+    // We identify them by the cover CDN domain.
+    const results: SearchResult[] = [];
+    const seen = new Set<string>();
+
+    // Find all <a> elements that link to novel pages and have a static.novelbuddy.com cover image
+    const allLinks = root.querySelectorAll('a[href]');
+    for (const link of allLinks) {
+      const href = link.getAttribute('href') || '';
+      // Skip non-novel links (must be a simple /slug path, no extra segments)
+      if (!href.startsWith('/') || href.split('/').length !== 2 || href === '/') continue;
+
+      const img = link.querySelector('img');
+      if (!img) continue;
+
+      const imgSrc = img.getAttribute('src') || '';
+      if (!imgSrc.includes('static.novelbuddy.com/covers/')) continue;
+
+      const slug = href.slice(1); // remove leading /
+      if (seen.has(slug)) continue;
+
+      const titleEl = link.querySelector('p');
+      const title = (titleEl?.textContent || img.getAttribute('alt') || slug)
+        .replace(/&#x27;/g, "'")
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (!title) continue;
+      seen.add(slug);
+
+      results.push({
+        title,
+        url: `${origin}${href}`,
+        coverUrl: imgSrc,
+        source: 'NovelBuddy',
+      } as SearchResult);
+
+      // The trending section only shows 10 items — stop once we have them
+      if (results.length >= 10) break;
+    }
+
+    return results;
+  } catch (e: any) {
+    console.warn('[DEBUG] fetchNovelBuddyTrending error:', e.message);
+    return [];
+  }
 }

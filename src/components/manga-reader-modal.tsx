@@ -155,6 +155,7 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const [showHeader, setShowHeader] = useState(false);
   const lastOffsetY = useRef(0);
   const headerOpacity = useRef(new Animated.Value(0)).current;
+  const wasOpened = useRef(false);
 
   // Reading progress state
   const [currentPageIdx, setCurrentPageIdx] = useState(0);
@@ -240,20 +241,21 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
       const hasSetBehavior = typeof NavigationBar.setBehaviorAsync === 'function';
 
       if (isOpen) {
+        wasOpened.current = true;
         if (hasSetVisibility) {
           NavigationBar.setVisibilityAsync('hidden').catch((err: any) => console.warn(err));
         }
         if (hasSetBehavior) {
           NavigationBar.setBehaviorAsync('overlay-swipe').catch((err: any) => console.warn(err));
         }
-      } else {
+      } else if (wasOpened.current) {
         if (hasSetVisibility) {
           NavigationBar.setVisibilityAsync('visible').catch((err: any) => console.warn(err));
         }
       }
 
       return () => {
-        if (hasSetVisibility) {
+        if (hasSetVisibility && wasOpened.current) {
           NavigationBar.setVisibilityAsync('visible').catch((err: any) => console.warn(err));
         }
       };

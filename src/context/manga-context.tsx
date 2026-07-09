@@ -75,8 +75,11 @@ interface MangaContextType {
   latestUpdates: SearchResult[];
   loadingLatest: boolean;
   loadingMore: boolean;
+  hasMorePages: boolean;
   fetchLatestUpdates: () => Promise<void>;
   fetchMoreLatestUpdates: () => Promise<void>;
+  trendingNovels: SearchResult[];
+  loadingTrending: boolean;
 }
 
 const MangaContext = createContext<MangaContextType | undefined>(undefined);
@@ -167,7 +170,10 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   const [latestUpdates, setLatestUpdates] = useState<SearchResult[]>([]);
   const [loadingLatest, setLoadingLatest] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMorePages, setHasMorePages] = useState(true);
   const [currentLatestPage, setCurrentLatestPage] = useState(1);
+  const [trendingNovels, setTrendingNovels] = useState<SearchResult[]>([]);
+  const [loadingTrending, setLoadingTrending] = useState(false);
 
   const downloadIntervals = useRef<Record<string, NodeJS.Timeout>>({});
   const downloadStateRef = useRef<Record<string, 'downloading' | 'paused' | 'cancelled' | 'completed'>>({});
@@ -471,6 +477,11 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   // Fetch latest updates whenever activeSource changes
   useEffect(() => {
     fetchLatestUpdates();
+    if (activeSource === 'NovelBuddy') {
+      fetchTrendingNovels();
+    } else {
+      setTrendingNovels([]);
+    }
   }, [activeSource]);
 
   const clearDetails = () => setMangaDetails(null);
@@ -528,25 +539,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       const normalizedUrl = normalizeMangaUrl(url);
       const scraped = await fetchMangaDetailsReal(normalizedUrl, activeSource);
       
-      let alternativeUrl = scraped.alternativeUrl;
-      let alternativeSource = scraped.alternativeSource;
-      let alternativeChaptersCount = scraped.alternativeChaptersCount;
-
-      if (!alternativeUrl && mangaDetails) {
-        const prevTitle = mangaDetails.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const newTitle = scraped.title.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (prevTitle === newTitle) {
-          alternativeUrl = mangaDetails.url;
-          alternativeSource = mangaDetails.url.includes('novellive.app') ? 'Novel Live' : 'Novel Buddy';
-          alternativeChaptersCount = mangaDetails.chapters.length;
-        }
-      }
-
       setMangaDetails({
         ...scraped,
-        alternativeUrl,
-        alternativeSource,
-        alternativeChaptersCount,
         source: activeSource,
         url: normalizedUrl,
       });
@@ -1290,6 +1284,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
 
   const fetchLatestUpdates = async () => {
     setLoadingMore(false); // Reset pagination loading indicator to prevent stuck state on source change
+    setHasMorePages(true); // Reset pagination availability for new source
+    setCurrentLatestPage(1); // Reset page counter for new source
     setLoadingLatest(true);
     if (Platform.OS === 'web') {
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -1383,7 +1379,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   };
 
   const fetchMoreLatestUpdates = async () => {
-    if (loadingMore || Platform.OS === 'web') return;
+    if (loadingMore || !hasMorePages || Platform.OS === 'web') return;
     setLoadingMore(true);
     console.log('[DEBUG] fetchMoreLatestUpdates called. Current page:', currentLatestPage, 'activeSource:', activeSource);
     try {
@@ -1408,12 +1404,27 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         setCurrentLatestPage(nextPage);
         console.log('[DEBUG] Successfully appended page:', nextPage, 'New page state set to:', nextPage);
       } else {
-        console.log('[DEBUG] No results returned for page:', nextPage);
+        console.log('[DEBUG] No more pages available for source:', activeSource, '- stopping pagination.');
+        setHasMorePages(false);
       }
     } catch (e: any) {
       console.error('[DEBUG] Erro ao carregar mais:', e);
     } finally {
       setLoadingMore(false);
+    }
+  };
+
+  const fetchTrendingNovels = async () => {
+    if (Platform.OS === 'web') return;
+    setLoadingTrending(true);
+    try {
+      const { fetchNovelBuddyTrending } = require('@/utils/scraper');
+      const results = await fetchNovelBuddyTrending();
+      setTrendingNovels(results);
+    } catch (e: any) {
+      console.warn('[DEBUG] fetchTrendingNovels error:', e.message);
+    } finally {
+      setLoadingTrending(false);
     }
   };
 
@@ -1454,8 +1465,11 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         latestUpdates,
         loadingLatest,
         loadingMore,
+        hasMorePages,
         fetchLatestUpdates,
         fetchMoreLatestUpdates,
+        trendingNovels,
+        loadingTrending,
       }}>
       {children}
     </MangaContext.Provider>

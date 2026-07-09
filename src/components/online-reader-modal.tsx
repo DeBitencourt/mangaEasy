@@ -115,6 +115,7 @@ export default function OnlineReaderModal({
   const [showHeader, setShowHeader] = useState(false);
   const lastOffsetY = useRef(0);
   const headerOpacity = useRef(new Animated.Value(0)).current;
+  const wasOpened = useRef(false);
 
   const [currentPageIdx, setCurrentPageIdx] = useState(0);
 
@@ -225,12 +226,17 @@ export default function OnlineReaderModal({
   useEffect(() => {
     if (Platform.OS === 'android' && NavigationBar) {
       if (isOpen) {
+        wasOpened.current = true;
         NavigationBar.setVisibilityAsync?.('hidden').catch(console.warn);
         NavigationBar.setBehaviorAsync?.('overlay-swipe').catch(console.warn);
-      } else {
+      } else if (wasOpened.current) {
         NavigationBar.setVisibilityAsync?.('visible').catch(console.warn);
       }
-      return () => { NavigationBar.setVisibilityAsync?.('visible').catch(console.warn); };
+      return () => {
+        if (wasOpened.current) {
+          NavigationBar.setVisibilityAsync?.('visible').catch(console.warn);
+        }
+      };
     }
   }, [isOpen]);
 

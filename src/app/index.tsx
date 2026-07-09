@@ -6,6 +6,7 @@ import {
   FlatList,
   Animated,
   View,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -41,11 +42,14 @@ export default function HomeScreen() {
     latestUpdates,
     loadingLatest,
     loadingMore,
+    hasMorePages,
     fetchLatestUpdates,
     fetchMoreLatestUpdates,
     localLibrary,
     updateLastReadChapter,
     scanLibrary,
+    trendingNovels,
+    loadingTrending,
   } = useManga();
 
   const [searchInput, setSearchInput] = useState('');
@@ -202,7 +206,7 @@ export default function HomeScreen() {
             {/* Dropdown Menu Overlay */}
             {showSourceSelector && (
               <ThemedView type="backgroundElement" style={styles.dropdownMenu}>
-                {['mangaread.org', 'asuracomics.net', 'Web Novels', 'NovelBuddy'].map((src) => {
+                {['mangaread.org', 'asuracomics.net', 'NovelBuddy'].map((src) => {
                   const isSelected = activeSource === src;
                   return (
                     <Pressable
@@ -275,7 +279,7 @@ export default function HomeScreen() {
               onEndReached={() => {
                 console.log('[DEBUG] FlatList onEndReached triggered. searchInput:', searchInput, 'loadingMore:', loadingMore, 'loadingLatest:', loadingLatest);
                 // Only paginate latest updates, not search results
-                if (searchInput.trim().length === 0 && !loadingMore && !loadingLatest) {
+                if (searchInput.trim().length === 0 && !loadingMore && !loadingLatest && hasMorePages) {
                   fetchMoreLatestUpdates();
                 }
               }}
@@ -289,18 +293,104 @@ export default function HomeScreen() {
                 ) : null
               }
               ListHeaderComponent={
-                <View style={[styles.headerContainer, { borderBottomColor: theme.backgroundSelected }]}>
-                  <View style={[styles.headerMarker, { backgroundColor: theme.accent }]} />
-                  <ThemedText type="smallBold" themeColor="text" style={styles.gridHeaderTitle}>
-                    {searchInput.trim().length > 0 ? 'RESULTADOS DA BUSCA' : 'ÚLTIMOS LANÇAMENTOS'}
-                  </ThemedText>
+                <View>
+                  {/* Trending Novels – only shown for NovelBuddy when not searching */}
+                  {activeSource === 'NovelBuddy' && searchInput.trim().length === 0 && (
+                    <View style={{ marginBottom: 16 }}>
+                      <View style={[styles.headerContainer, { borderBottomColor: theme.backgroundSelected, marginBottom: 10 }]}>
+                        <View style={[styles.headerMarker, { backgroundColor: '#f59e0b' }]} />
+                        <ThemedText type="smallBold" themeColor="text" style={styles.gridHeaderTitle}>
+                          🔥 TRENDING NOVELS
+                        </ThemedText>
+                      </View>
+                      {loadingTrending ? (
+                        <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+                          <ActivityIndicator size="small" color={theme.accent} />
+                        </View>
+                      ) : (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={{ paddingHorizontal: 12, gap: 10 }}
+                        >
+                          {trendingNovels.map((novel, idx) => (
+                            <Pressable
+                              key={novel.url}
+                              onPress={() => handleSelectManga(novel.url)}
+                              style={({ pressed }) => ({
+                                width: 90,
+                                opacity: pressed ? 0.75 : 1,
+                              })}
+                            >
+                              <View style={{
+                                width: 90,
+                                height: 130,
+                                borderRadius: 8,
+                                overflow: 'hidden',
+                                backgroundColor: theme.backgroundElement,
+                                borderWidth: 1,
+                                borderColor: theme.backgroundSelected,
+                              }}>
+                                <Image
+                                  source={{ uri: novel.coverUrl }}
+                                  style={{ width: '100%', height: '100%' }}
+                                  contentFit="cover"
+                                />
+                                {/* Rank badge */}
+                                <View style={{
+                                  position: 'absolute',
+                                  top: 4,
+                                  left: 4,
+                                  width: 22,
+                                  height: 22,
+                                  borderRadius: 4,
+                                  backgroundColor: idx === 0 ? '#f59e0b' : idx === 1 ? '#94a3b8' : idx === 2 ? '#f97316' : 'rgba(0,0,0,0.6)',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}>
+                                  <ThemedText style={{ fontSize: 10, fontWeight: '800', color: '#fff' }}>
+                                    {idx + 1}
+                                  </ThemedText>
+                                </View>
+                                {/* Gradient overlay at bottom */}
+                                <View style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  left: 0,
+                                  right: 0,
+                                  height: 40,
+                                  backgroundColor: 'rgba(0,0,0,0.55)',
+                                }} />
+                              </View>
+                              <ThemedText
+                                type="small"
+                                themeColor="text"
+                                numberOfLines={2}
+                                style={{ marginTop: 5, fontSize: 11, lineHeight: 14 }}
+                              >
+                                {novel.title}
+                              </ThemedText>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Latest Updates header */}
+                  <View style={[styles.headerContainer, { borderBottomColor: theme.backgroundSelected }]}>
+                    <View style={[styles.headerMarker, { backgroundColor: theme.accent }]} />
+                    <ThemedText type="smallBold" themeColor="text" style={styles.gridHeaderTitle}>
+                      {searchInput.trim().length > 0 ? 'RESULTADOS DA BUSCA' : 'ÚLTIMOS LANÇAMENTOS'}
+                    </ThemedText>
+                  </View>
                 </View>
               }
               renderItem={({ item }) => {
-                const ratingVal = item.rating ? parseFloat(item.rating) : (3.5 + (item.title.charCodeAt(0) % 15) / 10);
+                const ratingVal = item.rating ? parseFloat(item.rating) : (item.title && item.title.length > 0 ? (3.5 + (item.title.charCodeAt(0) % 15) / 10) : 4.0);
                 const filledStars = Math.round(ratingVal);
                 
-                const isFav = favoriteTitles.has(item.title.toLowerCase());
+                const isFav = favoriteTitles.has(item.title ? item.title.toLowerCase() : '');
 
                 return (
                   <Pressable
