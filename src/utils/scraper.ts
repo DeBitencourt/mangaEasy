@@ -1762,7 +1762,7 @@ export async function fetchNovelFullDetails(novelUrl: string, page: number = 1):
       chapters,
       chapterUrls,
       totalPages,
-      source: 'NovelFull',
+      source: 'novelfull.com',
       url: novelUrl.startsWith('http') ? novelUrl : `${origin}${novelUrl}`
     };
   } catch (e: any) {

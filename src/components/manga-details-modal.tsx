@@ -53,7 +53,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
 
   // Source states
-  const [readingSource, setReadingSource] = useState<'novelbuddy.com' | 'NovelFull' | 'mangadex.org'>('novelbuddy.com');
+  const [readingSource, setReadingSource] = useState<'novelbuddy.com' | 'novelfull.com' | 'mangadex.org'>('novelbuddy.com');
   const [loadingNovelFull, setLoadingNovelFull] = useState(false);
   const [novelFullDetails, setNovelFullDetails] = useState<any>(null);
   const [novelFullPage, setNovelFullPage] = useState(1);
@@ -91,8 +91,12 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setRangeEnd('');
       setIsSourceDropdownOpen(false);
       
-      const isMangaDexSource = (mangaDetails as any)?.source === 'mangadex.org';
-      setReadingSource(isMangaDexSource ? 'mangadex.org' : 'novelbuddy.com');
+      const originSource = (mangaDetails as any)?.source;
+      if (originSource === 'mangadex.org' || originSource === 'novelbuddy.com' || originSource === 'novelfull.com') {
+        setReadingSource(originSource);
+      } else {
+        setReadingSource('novelbuddy.com');
+      }
 
       setNovelFullDetails(null);
       setNovelFullPage(1);
@@ -177,7 +181,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       novelPath = await searchNovelFull(mangaDetails.title);
 
       if (!novelPath) {
-        onShowToast('Nenhum resultado encontrado no NovelFull.', 'error');
+        onShowToast('Nenhum resultado encontrado no novelfull.com.', 'error');
         setReadingSource('novelbuddy.com');
         setLoadingNovelFull(false);
         return;
@@ -203,7 +207,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setNovelFullPage(page);
     } catch (e: any) {
       console.error('[DEBUG] loadNovelFullDetails error:', e);
-      onShowToast('Erro ao carregar capítulos do NovelFull.', 'error');
+      onShowToast('Erro ao carregar capítulos do novelfull.com.', 'error');
       setReadingSource('novelbuddy.com');
     } finally {
       setLoadingNovelFull(false);
@@ -303,7 +307,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
 
   const handleSelectAll = () => {
     if (!mangaDetails) return;
-    const baseList = readingSource === 'NovelFull'
+    const baseList = readingSource === 'novelfull.com'
       ? (novelFullDetails?.chapters || [])
       : readingSource === 'mangadex.org'
         ? (mangaDexDetails?.chapters || [])
@@ -328,7 +332,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     const min = Math.min(startNum, endNum);
     const max = Math.max(startNum, endNum);
 
-    const baseList = readingSource === 'NovelFull'
+    const baseList = readingSource === 'novelfull.com'
       ? (novelFullDetails?.chapters || [])
       : readingSource === 'mangadex.org'
         ? (mangaDexDetails?.chapters || [])
@@ -361,7 +365,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       return;
     }
 
-    if (readingSource === 'NovelFull' && novelFullDetails) {
+    if (readingSource === 'novelfull.com' && novelFullDetails) {
       startDownload(
         selectedChapters,
         'Novel',
@@ -370,7 +374,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
           coverUrl: novelFullDetails.coverUrl,
           synopsis: novelFullDetails.synopsis || mangaDetails?.synopsis || '',
           chapterUrls: novelFullDetails.chapterUrls,
-          source: 'NovelFull',
+          source: 'novelfull.com',
         }
       );
     } else if (readingSource === 'mangadex.org' && mangaDexDetails) {
@@ -395,7 +399,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   };
 
   // Filter chapters by search input and language filter (if MangaDex)
-  const baseChapters = readingSource === 'NovelFull'
+  const baseChapters = readingSource === 'novelfull.com'
     ? (novelFullDetails?.chapters || [])
     : readingSource === 'mangadex.org'
       ? (mangaDexDetails?.chapters || mangaDetails?.chapters || [])
@@ -420,10 +424,10 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const mangaDexTotalPages = Math.ceil(filteredChapters.length / 50) || 1;
   const currentMangaDexPage = Math.min(mangaDexPage, mangaDexTotalPages);
 
-  const displayedChapters = (readingSource === 'NovelFull' || readingSource === 'mangadex.org')
+  const displayedChapters = (readingSource === 'novelfull.com' || readingSource === 'mangadex.org')
     ? displayedChaptersFull.slice(
-        ((readingSource === 'NovelFull' ? novelFullPage : currentMangaDexPage) - 1) * 50,
-        (readingSource === 'NovelFull' ? novelFullPage : currentMangaDexPage) * 50
+        ((readingSource === 'novelfull.com' ? novelFullPage : currentMangaDexPage) - 1) * 50,
+        (readingSource === 'novelfull.com' ? novelFullPage : currentMangaDexPage) * 50
       )
     : displayedChaptersFull;
 
@@ -567,7 +571,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
 
                     {/* Custom Override and Source Selector Row */}
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6, zIndex: 10 }}>
-                      {readingSource !== 'NovelBuddy' && readingSource !== 'NovelFull' && !mangaDetails.source?.toLowerCase().includes('asura') && (
+                      {readingSource !== 'novelbuddy.com' && readingSource !== 'novelfull.com' && !mangaDetails.source?.toLowerCase().includes('asura') && (
                         <View style={{ position: 'relative', zIndex: 15 }}>
                           <Pressable
                             onPress={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)}
@@ -676,7 +680,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                                 zIndex: 1000,
                                 minWidth: 120,
                               }}>
-                              {['novelbuddy.com', 'NovelFull', 'mangadex.org'].map((src) => {
+                              {['novelbuddy.com', 'novelfull.com'].map((src) => {
                                 const isOptionSelected = readingSource === src;
                                 return (
                                   <Pressable
@@ -684,16 +688,14 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                                     onPress={() => {
                                       setReadingSource(src as any);
                                       setIsSourceDropdownOpen(false);
-                                      if (src === 'NovelFull' && !novelFullDetails) {
+                                      if (src === 'novelfull.com' && !novelFullDetails) {
                                         loadNovelFullDetails(1);
-                                      } else if (src === 'mangadex.org' && !mangaDexDetails) {
-                                        loadMangaDexDetails(1);
                                       }
                                     }}
                                     style={{
                                       paddingVertical: 6,
                                       paddingHorizontal: 8,
-                                      borderBottomWidth: src === 'mangadex.org' ? 0 : 0.5,
+                                      borderBottomWidth: src === 'novelfull.com' ? 0 : 0.5,
                                       borderBottomColor: theme.backgroundSelected,
                                       backgroundColor: isOptionSelected ? theme.backgroundSelected : undefined,
                                     }}>
@@ -882,7 +884,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                   <View style={{ height: 200, justifyContent: 'center', alignItems: 'center', gap: 8 }}>
                     <ActivityIndicator size="large" color={theme.accent} />
                     <ThemedText type="small" themeColor="textSecondary">
-                      {loadingMangaDex ? 'Buscando capítulos no MangaDex...' : 'Buscando capítulos no NovelFull...'}
+                      {loadingMangaDex ? 'Buscando capítulos no mangadex.org...' : 'Buscando capítulos no novelfull.com...'}
                     </ThemedText>
                   </View>
                 ) : (
@@ -895,7 +897,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                       {displayedChapters.map((item, idx) => {
                         const isChecked = selectedChapters.includes(item);
                         const alreadyDownloaded = isDownloaded(item);
-                        const hasUrl = readingSource === 'NovelFull'
+                        const hasUrl = readingSource === 'novelfull.com'
                           ? !!novelFullDetails?.chapterUrls?.[item]
                           : readingSource === 'mangadex.org'
                             ? !!(mangaDexDetails?.chapterUrls?.[item] || mangaDetails?.chapterUrls?.[item])
@@ -972,34 +974,34 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                     </ScrollView>
 
                     {/* Source Pagination (NovelFull & MangaDex) */}
-                    {((readingSource === 'NovelFull' && novelFullDetails && novelFullDetails.totalPages > 1) ||
+                    {((readingSource === 'novelfull.com' && novelFullDetails && novelFullDetails.totalPages > 1) ||
                       (readingSource === 'mangadex.org' && mangaDexTotalPages > 1)) && (
                       <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginVertical: 12, gap: 16 }}>
                         <Pressable
-                          disabled={(readingSource === 'NovelFull' ? novelFullPage === 1 : currentMangaDexPage === 1) || loadingNovelFull || loadingMangaDex}
-                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage - 1) : loadMangaDexDetails(currentMangaDexPage - 1)}
+                          disabled={(readingSource === 'novelfull.com' ? novelFullPage === 1 : currentMangaDexPage === 1) || loadingNovelFull || loadingMangaDex}
+                          onPress={() => readingSource === 'novelfull.com' ? loadNovelFullDetails(novelFullPage - 1) : loadMangaDexDetails(currentMangaDexPage - 1)}
                           style={({ pressed }) => ({
                             paddingVertical: 6,
                             paddingHorizontal: 12,
                             borderRadius: 6,
                             backgroundColor: theme.backgroundSelected,
-                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === 1 : currentMangaDexPage === 1) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
+                            opacity: ((readingSource === 'novelfull.com' ? novelFullPage === 1 : currentMangaDexPage === 1) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
                           })}
                         >
                           <ThemedText type="smallBold">{"< Anterior"}</ThemedText>
                         </Pressable>
                         <ThemedText type="smallBold">
-                          Pág. {readingSource === 'NovelFull' ? novelFullPage : currentMangaDexPage} / {readingSource === 'NovelFull' ? novelFullDetails.totalPages : mangaDexTotalPages}
+                          Pág. {readingSource === 'novelfull.com' ? novelFullPage : currentMangaDexPage} / {readingSource === 'novelfull.com' ? novelFullDetails.totalPages : mangaDexTotalPages}
                         </ThemedText>
                         <Pressable
-                          disabled={(readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : currentMangaDexPage === mangaDexTotalPages) || loadingNovelFull || loadingMangaDex}
-                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage + 1) : loadMangaDexDetails(currentMangaDexPage + 1)}
+                          disabled={(readingSource === 'novelfull.com' ? novelFullPage === novelFullDetails.totalPages : currentMangaDexPage === mangaDexTotalPages) || loadingNovelFull || loadingMangaDex}
+                          onPress={() => readingSource === 'novelfull.com' ? loadNovelFullDetails(novelFullPage + 1) : loadMangaDexDetails(currentMangaDexPage + 1)}
                           style={({ pressed }) => ({
                             paddingVertical: 6,
                             paddingHorizontal: 12,
                             borderRadius: 6,
                             backgroundColor: theme.backgroundSelected,
-                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : currentMangaDexPage === mangaDexTotalPages) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
+                            opacity: ((readingSource === 'novelfull.com' ? novelFullPage === novelFullDetails.totalPages : currentMangaDexPage === mangaDexTotalPages) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
                           })}
                         >
                           <ThemedText type="smallBold">{"Próxima >"}</ThemedText>
@@ -1038,28 +1040,28 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
           setOnlineReaderChapter(null);
         }}
         mangaTitle={
-          readingSource === 'NovelFull' && novelFullDetails
+          readingSource === 'novelfull.com' && novelFullDetails
             ? novelFullDetails.title
             : readingSource === 'mangadex.org' && mangaDexDetails
               ? mangaDexDetails.title
               : mangaDetails.title
         }
         mangaType={
-          readingSource === 'NovelFull'
+          readingSource === 'novelfull.com'
             ? 'Novel'
             : readingSource === 'mangadex.org'
               ? 'Manga'
               : (selectedType || (mangaDetails as any).mangaType)
         }
         chapters={
-          readingSource === 'NovelFull' && novelFullDetails
+          readingSource === 'novelfull.com' && novelFullDetails
             ? novelFullDetails.chapters
             : readingSource === 'mangadex.org' && mangaDexDetails
               ? mangaDexDetails.chapters
               : mangaDetails.chapters
         }
         chapterUrls={
-          readingSource === 'NovelFull' && novelFullDetails
+          readingSource === 'novelfull.com' && novelFullDetails
             ? (novelFullDetails.chapterUrls || {})
             : readingSource === 'mangadex.org' && mangaDexDetails
               ? (mangaDexDetails.chapterUrls || {})
