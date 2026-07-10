@@ -719,7 +719,7 @@ export async function fetchChapterImagesReal(chapterUrl: string): Promise<string
   if (chapterUrl.startsWith('mangadex://')) {
     try {
       const chapterId = chapterUrl.replace('mangadex://', '');
-      const response = await fetch(`https://api.mangadex.org/at-home/server/${chapterId}`);
+      const response = await fetch(`https://api.mangadex.org/at-home/server/${chapterId}?forcePort443=true`);
       if (!response.ok) {
         throw new Error(`Erro ao buscar imagens no servidor MangaDex (status ${response.status})`);
       }
