@@ -262,7 +262,7 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
       
       const allCh = await fetchMangaDexChapters(mangaId);
       const queryUrl = `https://api.mangadex.org/manga/${mangaId}?includes[]=cover_art`;
-      const response = await fetch(queryUrl, { headers: DEFAULT_HEADERS });
+      const response = await fetch(queryUrl, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) {
         throw new Error(`Erro ao obter detalhes do MangaDex (status ${response.status})`);
       }
@@ -1858,7 +1858,7 @@ export async function fetchNovelFullAllChapters(novelUrl: string): Promise<{ cha
 export async function searchMangaDex(title: string): Promise<any> {
   try {
     const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=5&includes[]=cover_art`;
-    const response = await fetch(queryUrl, { headers: DEFAULT_HEADERS });
+    const response = await fetch(queryUrl, { headers: { 'Accept': 'application/json' } });
     if (!response.ok) {
       throw new Error(`MangaDex search failed (status ${response.status})`);
     }
@@ -1908,7 +1908,7 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<{ chapters
 
     while (offset < total) {
       const feedUrl = `https://api.mangadex.org/manga/${mangaId}/feed?limit=500&offset=${offset}&translatedLanguage[]=pt-br&translatedLanguage[]=en&order[chapter]=asc`;
-      const response = await fetch(feedUrl, { headers: DEFAULT_HEADERS });
+      const response = await fetch(feedUrl, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) {
         throw new Error(`Feed fetch failed (status ${response.status})`);
       }

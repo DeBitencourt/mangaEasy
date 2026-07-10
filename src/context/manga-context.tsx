@@ -969,10 +969,12 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
           try {
             addLog(`[DOWNLOAD] Baixando ${chapterTitle}: página ${pIdx + 1} de ${imageUrls.length}`);
             
+            const resolvedReferer = chapterUrl.startsWith('mangadex://') ? 'https://mangadex.org/' : chapterUrl;
+            
             await FileSystem.downloadAsync(imgUrl, fileUri, {
               headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-                'Referer': chapterUrl,
+                'Referer': resolvedReferer,
               },
             });
 

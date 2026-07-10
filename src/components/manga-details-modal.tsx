@@ -62,6 +62,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [loadingMangaDex, setLoadingMangaDex] = useState(false);
   const [mangaDexDetails, setMangaDexDetails] = useState<any>(null);
   const [mangaDexPage, setMangaDexPage] = useState(1);
+  const [langFilter, setLangFilter] = useState<'ALL' | 'PT-BR' | 'EN'>('ALL');
 
   // Range selector state
   const [isRangeActive, setIsRangeActive] = useState(false);
@@ -99,6 +100,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setMangaDexDetails(null);
       setMangaDexPage(1);
       setLoadingMangaDex(false);
+      setLangFilter('ALL');
     }
   }, [isOpen, mangaDetails]);
 
@@ -392,14 +394,21 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     setSelectedChapters([]);
   };
 
-  // Filter chapters by search input
+  // Filter chapters by search input and language filter (if MangaDex)
   const baseChapters = readingSource === 'NovelFull'
     ? (novelFullDetails?.chapters || [])
     : readingSource === 'MangaDex'
       ? (mangaDexDetails?.chapters || mangaDetails?.chapters || [])
       : (mangaDetails?.chapters || []);
 
-  const filteredChapters = baseChapters.filter((ch) =>
+  const languageFilteredChapters = baseChapters.filter((ch) => {
+    if (readingSource === 'MangaDex' && langFilter !== 'ALL') {
+      return ch.includes(`(${langFilter})`);
+    }
+    return true;
+  });
+
+  const filteredChapters = languageFilteredChapters.filter((ch) =>
     ch.toLowerCase().includes(searchChapter.toLowerCase())
   );
 
@@ -407,10 +416,14 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     ? [...filteredChapters].reverse()
     : filteredChapters;
 
+  // Recalculate dynamic total pages based on current language-filtered count
+  const mangaDexTotalPages = Math.ceil(filteredChapters.length / 50) || 1;
+  const currentMangaDexPage = Math.min(mangaDexPage, mangaDexTotalPages);
+
   const displayedChapters = (readingSource === 'NovelFull' || readingSource === 'MangaDex')
     ? displayedChaptersFull.slice(
-        ((readingSource === 'NovelFull' ? novelFullPage : mangaDexPage) - 1) * 50,
-        (readingSource === 'NovelFull' ? novelFullPage : mangaDexPage) * 50
+        ((readingSource === 'NovelFull' ? novelFullPage : currentMangaDexPage) - 1) * 50,
+        (readingSource === 'NovelFull' ? novelFullPage : currentMangaDexPage) * 50
       )
     : displayedChaptersFull;
 
@@ -554,7 +567,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
 
                     {/* Custom Override and Source Selector Row */}
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6, zIndex: 10 }}>
-                      {!mangaDetails.source?.toLowerCase().includes('asura') && (
+                      {readingSource !== 'NovelBuddy' && readingSource !== 'NovelFull' && !mangaDetails.source?.toLowerCase().includes('asura') && (
                         <View style={{ position: 'relative', zIndex: 15 }}>
                           <Pressable
                             onPress={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)}
@@ -821,6 +834,49 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                   </Pressable>
                 </View>
 
+                {/* Language Filter (Only for MangaDex) */}
+                {readingSource === 'MangaDex' && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12, gap: 8 }}>
+                    <ThemedText type="small" themeColor="textSecondary" style={{ marginRight: 4 }}>Idioma:</ThemedText>
+                    {[
+                      { key: 'ALL', label: 'Todos' },
+                      { key: 'PT-BR', label: 'Português' },
+                      { key: 'EN', label: 'Inglês' }
+                    ].map((opt) => {
+                      const isSel = langFilter === opt.key;
+                      return (
+                        <Pressable
+                          key={opt.key}
+                          onPress={() => {
+                            setLangFilter(opt.key as any);
+                            setMangaDexPage(1); // reset virtual page
+                            setSelectedChapters([]); // clear active selections
+                          }}
+                          style={({ pressed }) => ({
+                            paddingVertical: 4,
+                            paddingHorizontal: 10,
+                            borderRadius: 12,
+                            backgroundColor: isSel ? theme.accent : theme.backgroundSelected,
+                            opacity: pressed ? 0.8 : 1,
+                            borderWidth: 0.5,
+                            borderColor: isSel ? theme.accent : 'transparent',
+                          })}
+                        >
+                          <ThemedText
+                            type="smallBold"
+                            style={{
+                              fontSize: 11,
+                              color: isSel ? '#fff' : theme.text,
+                            }}
+                          >
+                            {opt.label}
+                          </ThemedText>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                )}
+
                 {/* Chapters List */}
                 {loadingNovelFull || loadingMangaDex ? (
                   <View style={{ height: 200, justifyContent: 'center', alignItems: 'center', gap: 8 }}>
@@ -917,33 +973,33 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
 
                     {/* Source Pagination (NovelFull & MangaDex) */}
                     {((readingSource === 'NovelFull' && novelFullDetails && novelFullDetails.totalPages > 1) ||
-                      (readingSource === 'MangaDex' && mangaDexDetails && mangaDexDetails.totalPages > 1)) && (
+                      (readingSource === 'MangaDex' && mangaDexTotalPages > 1)) && (
                       <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginVertical: 12, gap: 16 }}>
                         <Pressable
-                          disabled={(readingSource === 'NovelFull' ? novelFullPage === 1 : mangaDexPage === 1) || loadingNovelFull || loadingMangaDex}
-                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage - 1) : loadMangaDexDetails(mangaDexPage - 1)}
+                          disabled={(readingSource === 'NovelFull' ? novelFullPage === 1 : currentMangaDexPage === 1) || loadingNovelFull || loadingMangaDex}
+                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage - 1) : loadMangaDexDetails(currentMangaDexPage - 1)}
                           style={({ pressed }) => ({
                             paddingVertical: 6,
                             paddingHorizontal: 12,
                             borderRadius: 6,
                             backgroundColor: theme.backgroundSelected,
-                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === 1 : mangaDexPage === 1) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
+                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === 1 : currentMangaDexPage === 1) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
                           })}
                         >
                           <ThemedText type="smallBold">{"< Anterior"}</ThemedText>
                         </Pressable>
                         <ThemedText type="smallBold">
-                          Pág. {readingSource === 'NovelFull' ? novelFullPage : mangaDexPage} / {readingSource === 'NovelFull' ? novelFullDetails.totalPages : mangaDexDetails.totalPages}
+                          Pág. {readingSource === 'NovelFull' ? novelFullPage : currentMangaDexPage} / {readingSource === 'NovelFull' ? novelFullDetails.totalPages : mangaDexTotalPages}
                         </ThemedText>
                         <Pressable
-                          disabled={(readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : mangaDexPage === mangaDexDetails.totalPages) || loadingNovelFull || loadingMangaDex}
-                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage + 1) : loadMangaDexDetails(mangaDexPage + 1)}
+                          disabled={(readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : currentMangaDexPage === mangaDexTotalPages) || loadingNovelFull || loadingMangaDex}
+                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage + 1) : loadMangaDexDetails(currentMangaDexPage + 1)}
                           style={({ pressed }) => ({
                             paddingVertical: 6,
                             paddingHorizontal: 12,
                             borderRadius: 6,
                             backgroundColor: theme.backgroundSelected,
-                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : mangaDexPage === mangaDexDetails.totalPages) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
+                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : currentMangaDexPage === mangaDexTotalPages) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
                           })}
                         >
                           <ThemedText type="smallBold">{"Próxima >"}</ThemedText>

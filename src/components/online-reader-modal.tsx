@@ -51,10 +51,21 @@ const OnlineReaderPage = React.memo(({ uri, index, totalPages, viewMode, styles 
     ? { width: screenWidth, height: screenWidth / aspectRatio, backgroundColor: '#000000' }
     : styles.readerPageImage;
 
+  const isMangaDexImage = uri.includes('mangadex.org');
+  const sourceProp = isMangaDexImage
+    ? {
+        uri,
+        headers: {
+          'Referer': 'https://mangadex.org/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        }
+      }
+    : { uri };
+
   return (
     <View style={containerStyle}>
       <Image
-        source={{ uri }}
+        source={sourceProp}
         style={imageStyle}
         contentFit={isWebtoon ? 'fill' : 'contain'}
         onLoad={handleLoad}
