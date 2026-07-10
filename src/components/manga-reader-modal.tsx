@@ -72,21 +72,35 @@ interface ReaderPageProps {
   totalPages: number;
   viewMode: 'manga' | 'webtoon';
   styles: any;
+  initialAspectRatio: number;
+  onAspectRatioLoaded: (ratio: number) => void;
 }
 
-const ReaderPage = React.memo(({ uri, index, totalPages, viewMode, styles }: ReaderPageProps) => {
+const ReaderPage = React.memo(({ 
+  uri, 
+  index, 
+  totalPages, 
+  viewMode, 
+  styles,
+  initialAspectRatio,
+  onAspectRatioLoaded
+}: ReaderPageProps) => {
   const isWebtoon = viewMode === 'webtoon';
 
-  // Start with a tall portrait ratio for webtoon to minimize layout shifts when image loads
-  const [aspectRatio, setAspectRatio] = useState<number>(isWebtoon ? 0.5 : 0.7);
+  const [aspectRatio, setAspectRatio] = useState<number>(initialAspectRatio);
+
+  useEffect(() => {
+    setAspectRatio(initialAspectRatio);
+  }, [initialAspectRatio]);
 
   const handleLoad = (event: any) => {
     const { width, height } = event.source;
     if (width && height) {
-      setAspectRatio(width / height);
+      const ratio = width / height;
+      setAspectRatio(ratio);
+      onAspectRatioLoaded(ratio);
     }
   };
-
 
   const containerStyle = [
     styles.readerPageContainer,
@@ -150,7 +164,6 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
   const [showChapterSelector, setShowChapterSelector] = useState(false);
   const [viewMode, setViewMode] = useState<'manga' | 'webtoon'>('manga');
   const flatListRef = React.useRef<FlatList>(null);
-  const webtoonScrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const [showHeader, setShowHeader] = useState(false);
   const lastOffsetY = useRef(0);
@@ -159,8 +172,7 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
 
   // Reading progress state
   const [currentPageIdx, setCurrentPageIdx] = useState(0);
-  // Accumulated page heights for webtoon mode (to estimate current page from scroll offset)
-  const pageHeightsRef = useRef<number[]>([]);
+  const pageAspectRatiosRef = useRef<number[]>([]);
 
   const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
     if (viewableItems && viewableItems.length > 0) {
@@ -175,41 +187,15 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
     itemVisiblePercentThreshold: 50,
   }).current;
 
-  // Webtoon page height tracking
-  const handleWebtoonPageLayout = useCallback((index: number, height: number) => {
-    pageHeightsRef.current[index] = height;
-  }, []);
-
-  // Calculate current page index from scroll offset in webtoon mode
-  const getWebtoonPageFromOffset = (offsetY: number): number => {
-    const heights = pageHeightsRef.current;
-    let accumulated = 0;
-    for (let i = 0; i < heights.length; i++) {
-      accumulated += heights[i] || 0;
-      if (offsetY < accumulated) return i;
-    }
-    return heights.length - 1;
-  };
-
   // Scroll to top when chapter changes (do NOT depend on chapterPages — its reference
   // changes on every load, which would cause spurious scroll-to-top jumps mid-reading)
   useEffect(() => {
-    pageHeightsRef.current = [];
-    if (viewMode === 'webtoon') {
-      if (webtoonScrollRef.current) {
-        try {
-          webtoonScrollRef.current.scrollTo({ y: 0, animated: false });
-        } catch (e) {
-          console.warn('Failed to scroll webtoon ScrollView to top:', e);
-        }
-      }
-    } else {
-      if (flatListRef.current) {
-        try {
-          flatListRef.current.scrollToOffset({ offset: 0, animated: false });
-        } catch (e) {
-          console.warn('Failed to scroll FlatList to top:', e);
-        }
+    pageAspectRatiosRef.current = [];
+    if (flatListRef.current) {
+      try {
+        flatListRef.current.scrollToOffset({ offset: 0, animated: false });
+      } catch (e) {
+        console.warn('Failed to scroll FlatList to top:', e);
       }
     }
   }, [currentChapter]);
@@ -360,6 +346,7 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
     setChapterPages([]);
     setShowChapterSelector(false);
     setCurrentPageIdx(0);
+    pageAspectRatiosRef.current = [];
 
     if (manga) {
       addReadingHistoryLocal(manga.mangaTitle, chapTitle).catch(console.error);
@@ -525,14 +512,6 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
     else if (diff < -10 || currentOffsetY <= 20) {
       if (!showHeader) {
         setShowHeader(true);
-      }
-    }
-
-    // Update current page index in webtoon mode based on scroll position
-    if (viewMode === 'webtoon') {
-      const pageIdx = getWebtoonPageFromOffset(currentOffsetY);
-      if (pageIdx !== currentPageIdx) {
-        setCurrentPageIdx(pageIdx);
       }
     }
 
@@ -745,43 +724,8 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
                 </View>
               )}
             </ScrollView>
-          ) : viewMode === 'webtoon' ? (
-            // Webtoon mode: plain ScrollView avoids FlatList layout-recalc scroll jumps
-            <ScrollView
-              ref={webtoonScrollRef}
-              showsVerticalScrollIndicator={false}
-              onScroll={handleScroll}
-              scrollEventThrottle={16}
-            >
-              {chapterPages.length === 0 ? (
-                <View style={styles.readerEmpty}>
-                  <SymbolView name="doc.text.fill" size={32} tintColor="#666" />
-                  <ThemedText type="smallBold" style={{ marginTop: Spacing.two, color: '#888' }}>
-                    Nenhuma página encontrada
-                  </ThemedText>
-                  <ThemedText type="small" style={{ textAlign: 'center', marginTop: 4, color: '#666' }}>
-                    Não foi possível encontrar imagens neste capítulo.
-                  </ThemedText>
-                </View>
-              ) : (
-                chapterPages.map((uri, index) => (
-                  <View
-                    key={uri}
-                    onLayout={(e) => handleWebtoonPageLayout(index, e.nativeEvent.layout.height)}
-                  >
-                    <ReaderPage
-                      uri={uri}
-                      index={index}
-                      totalPages={chapterPages.length}
-                      viewMode={viewMode}
-                      styles={styles}
-                    />
-                  </View>
-                ))
-              )}
-            </ScrollView>
           ) : (
-            // Manga mode: FlatList for virtualised paged reading
+            // Manga/Webtoon mode: FlatList for virtualised paged reading
             <FlatList
               ref={flatListRef}
               data={chapterPages}
@@ -789,6 +733,11 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
               showsVerticalScrollIndicator={false}
               onScroll={handleScroll}
               scrollEventThrottle={16}
+              removeClippedSubviews={Platform.OS === 'android'}
+              maxToRenderPerBatch={3}
+              windowSize={5}
+              initialNumToRender={3}
+              updateCellsBatchingPeriod={30}
               renderItem={({ item, index }) => (
                 <ReaderPage
                   uri={item}
@@ -796,6 +745,10 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
                   totalPages={chapterPages.length}
                   viewMode={viewMode}
                   styles={styles}
+                  initialAspectRatio={pageAspectRatiosRef.current[index] || (viewMode === 'webtoon' ? 0.5 : 0.7)}
+                  onAspectRatioLoaded={(ratio) => {
+                    pageAspectRatiosRef.current[index] = ratio;
+                  }}
                 />
               )}
               ListEmptyComponent={

@@ -35,15 +35,33 @@ interface ReaderPageProps {
   totalPages: number;
   viewMode: 'manga' | 'webtoon';
   styles: any;
+  initialAspectRatio: number;
+  onAspectRatioLoaded: (ratio: number) => void;
 }
 
-const OnlineReaderPage = React.memo(({ uri, index, totalPages, viewMode, styles }: ReaderPageProps) => {
+const OnlineReaderPage = React.memo(({ 
+  uri, 
+  index, 
+  totalPages, 
+  viewMode, 
+  styles,
+  initialAspectRatio,
+  onAspectRatioLoaded
+}: ReaderPageProps) => {
   const isWebtoon = viewMode === 'webtoon';
-  const [aspectRatio, setAspectRatio] = useState<number>(isWebtoon ? 0.5 : 0.7);
+  const [aspectRatio, setAspectRatio] = useState<number>(initialAspectRatio);
+
+  useEffect(() => {
+    setAspectRatio(initialAspectRatio);
+  }, [initialAspectRatio]);
 
   const handleLoad = (event: any) => {
     const { width, height } = event.source;
-    if (width && height) setAspectRatio(width / height);
+    if (width && height) {
+      const ratio = width / height;
+      setAspectRatio(ratio);
+      onAspectRatioLoaded(ratio);
+    }
   };
 
   const containerStyle = [styles.readerPageContainer, isWebtoon && { marginVertical: 0 }];
@@ -120,8 +138,7 @@ export default function OnlineReaderModal({
   const [viewMode, setViewMode] = useState<'manga' | 'webtoon'>(isManhwaType ? 'webtoon' : 'manga');
 
   const flatListRef = useRef<FlatList>(null);
-  const webtoonScrollRef = useRef<ScrollView>(null);
-  const pageHeightsRef = useRef<number[]>([]);
+  const pageAspectRatiosRef = useRef<number[]>([]);
 
   const [showHeader, setShowHeader] = useState(false);
   const lastOffsetY = useRef(0);
@@ -141,19 +158,7 @@ export default function OnlineReaderModal({
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
-  const handleWebtoonPageLayout = useCallback((index: number, height: number) => {
-    pageHeightsRef.current[index] = height;
-  }, []);
 
-  const getWebtoonPageFromOffset = (offsetY: number): number => {
-    const heights = pageHeightsRef.current;
-    let accumulated = 0;
-    for (let i = 0; i < heights.length; i++) {
-      accumulated += heights[i] || 0;
-      if (offsetY < accumulated) return i;
-    }
-    return heights.length - 1;
-  };
 
   // ── Load chapter ─────────────────────────────────────────────────────────
   const loadChapter = useCallback(async (chapterName: string) => {
@@ -163,7 +168,7 @@ export default function OnlineReaderModal({
     setLoadError(null);
     setCurrentPageIdx(0);
     setShowChapterSelector(false);
-    pageHeightsRef.current = [];
+    pageAspectRatiosRef.current = [];
 
     addReadingHistoryLocal(mangaTitle, chapterName).catch(console.error);
 
@@ -226,12 +231,8 @@ export default function OnlineReaderModal({
   }, [isOpen]);
 
   useEffect(() => {
-    pageHeightsRef.current = [];
-    if (viewMode === 'webtoon') {
-      webtoonScrollRef.current?.scrollTo({ y: 0, animated: false });
-    } else {
-      flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
-    }
+    pageAspectRatiosRef.current = [];
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [currentChapter]);
 
   useEffect(() => {
@@ -274,11 +275,6 @@ export default function OnlineReaderModal({
       if (showHeader) setShowHeader(false);
     } else if (diff < -10 || offsetY <= 20) {
       if (!showHeader) setShowHeader(true);
-    }
-
-    if (viewMode === 'webtoon') {
-      const pageIdx = getWebtoonPageFromOffset(offsetY);
-      if (pageIdx !== currentPageIdx) setCurrentPageIdx(pageIdx);
     }
 
     lastOffsetY.current = offsetY;
@@ -523,37 +519,6 @@ export default function OnlineReaderModal({
                 </View>
               )}
             </ScrollView>
-          ) : viewMode === 'webtoon' ? (
-            <ScrollView
-              ref={webtoonScrollRef}
-              showsVerticalScrollIndicator={false}
-              onScroll={handleScroll}
-              scrollEventThrottle={16}
-            >
-              {chapterPages.length === 0 ? (
-                <View style={styles.readerEmpty}>
-                  <SymbolView name="doc.text.fill" size={32} tintColor="#666" />
-                  <ThemedText type="smallBold" style={{ marginTop: Spacing.two, color: '#888' }}>
-                    Nenhuma pagina encontrada
-                  </ThemedText>
-                </View>
-              ) : (
-                chapterPages.map((uri, index) => (
-                  <View
-                    key={`${uri}-${index}`}
-                    onLayout={(e) => handleWebtoonPageLayout(index, e.nativeEvent.layout.height)}
-                  >
-                    <OnlineReaderPage
-                      uri={uri}
-                      index={index}
-                      totalPages={chapterPages.length}
-                      viewMode={viewMode}
-                      styles={styles}
-                    />
-                  </View>
-                ))
-              )}
-            </ScrollView>
           ) : (
             <FlatList
               ref={flatListRef}
@@ -562,6 +527,11 @@ export default function OnlineReaderModal({
               showsVerticalScrollIndicator={false}
               onScroll={handleScroll}
               scrollEventThrottle={16}
+              removeClippedSubviews={Platform.OS === 'android'}
+              maxToRenderPerBatch={3}
+              windowSize={5}
+              initialNumToRender={3}
+              updateCellsBatchingPeriod={30}
               renderItem={({ item, index }) => (
                 <OnlineReaderPage
                   uri={item}
@@ -569,6 +539,10 @@ export default function OnlineReaderModal({
                   totalPages={chapterPages.length}
                   viewMode={viewMode}
                   styles={styles}
+                  initialAspectRatio={pageAspectRatiosRef.current[index] || (viewMode === 'webtoon' ? 0.5 : 0.7)}
+                  onAspectRatioLoaded={(ratio) => {
+                    pageAspectRatiosRef.current[index] = ratio;
+                  }}
                 />
               )}
               ListEmptyComponent={

@@ -336,26 +336,149 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
     let titles: string[] = [];
     let urls: Record<string, string> = {};
 
-    const match = html.match(/var\s+novelId\s*=\s*(\d+)/) || html.match(/window\.novelId\s*=\s*(\d+)/) || html.match(/data-id=["'](\d+)["']/);
-    if (match && match[1]) {
-      const novelId = match[1];
+    const isCleanChapter = (text: string): boolean => {
+      const lower = text.toLowerCase();
+      return !(
+        lower.includes('read from start') ||
+        lower.includes('read first') ||
+        lower.includes('read last') ||
+        lower.includes('latest release') ||
+        lower.includes('next chapter') ||
+        lower.includes('previous chapter')
+      );
+    };
+
+    // Specific helper to find novelId/bookId in the Next.js pageProps JSON
+    const findIdInObject = (obj: any): string | null => {
+      if (!obj || typeof obj !== 'object') return null;
+      
+      // Try specific keys on the object directly first
+      const novelInfo = obj.novel || obj.manga || obj.book || {};
+      if (novelInfo.id) return String(novelInfo.id);
+      if (novelInfo.bookId) return String(novelInfo.bookId);
+
+      if (obj.novelId) return String(obj.novelId);
+      if (obj.bookId) return String(obj.bookId);
+      if (obj.mangaId) return String(obj.mangaId);
+
+      // Safe fallback if the object itself represents the book/manga detail
+      if (obj.id && (obj.synopsis || obj.description || obj.author || obj.cover || obj.coverUrl || obj.genres)) {
+        return String(obj.id);
+      }
+
+      // Traversal as fallback, but ignore chapter/latest sub-objects to avoid picking chapter IDs
+      const keys = Object.keys(obj);
+      for (const k of keys) {
+        if (k.toLowerCase().includes('chapter') || k.toLowerCase().includes('latest') || k.toLowerCase().includes('recent')) {
+          continue;
+        }
+        const found = findIdInObject(obj[k]);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    // Recursive helper to find all chapter-like arrays inside the Next.js pageProps JSON
+    const findAllChaptersInObject = (obj: any, foundArrays: any[][] = []): any[][] => {
+      if (!obj || typeof obj !== 'object') return foundArrays;
+      
+      if (Array.isArray(obj)) {
+        if (obj.length > 0) {
+          const first = obj[0];
+          if (first && typeof first === 'object') {
+            const keys = Object.keys(first).map(k => k.toLowerCase());
+            if (keys.some(k => k.includes('title') || k.includes('name') || k.includes('slug') || k.includes('href') || k === 'id')) {
+              if (!keys.some(k => k === 'genre' || k === 'author')) {
+                foundArrays.push(obj);
+              }
+            }
+          }
+        }
+      } else {
+        const keys = Object.keys(obj);
+        for (const key of keys) {
+          findAllChaptersInObject(obj[key], foundArrays);
+        }
+      }
+      return foundArrays;
+    };
+
+    // 1. Primary: Extract ID and attempt fetching the full chapter list via AJAX API
+    let novelId = '';
+    let nextDataObj: any = null;
+    const nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+    
+    if (nextDataMatch) {
       try {
-        const ajaxResponse = await fetch(`${origin}/api/manga/${novelId}/chapters?source=detail`, {
+        nextDataObj = JSON.parse(nextDataMatch[1]);
+        const extractedId = findIdInObject(nextDataObj?.props?.pageProps);
+        if (extractedId) {
+          novelId = extractedId;
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (!novelId) {
+      const match = html.match(/var\s+bookId\s*=\s*(\d+)/) ||
+                    html.match(/window\.bookId\s*=\s*(\d+)/) ||
+                    html.match(/bookId\s*=\s*(\d+)/) ||
+                    html.match(/var\s+novelId\s*=\s*(\d+)/) ||
+                    html.match(/window\.novelId\s*=\s*(\d+)/) ||
+                    html.match(/data-id=["'](\d+)["']/);
+      if (match && match[1]) {
+        novelId = match[1];
+      }
+    }
+
+    if (novelId) {
+      try {
+        const ajaxResponse = await fetch(`https://api.novelbuddy.com/titles/${novelId}/chapters?cv=${Date.now()}`, {
           method: 'GET',
           headers: {
             ...DEFAULT_HEADERS,
             'Referer': normalizedUrl,
+            'Origin': 'https://novelbuddy.com'
           },
         });
         if (ajaxResponse.ok) {
-          const ajaxHtml = await ajaxResponse.text();
-          const ajaxRoot = parse(ajaxHtml);
-          const anchors = ajaxRoot.querySelectorAll('a');
-          anchors.forEach((el, index) => {
-            const href = el.getAttribute('href');
-            const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
-            if (href) {
-              const cleanTitle = cleanChapterTitle(text, index + 1);
+          const json = await ajaxResponse.json();
+          const chapters = json?.data?.chapters;
+          if (Array.isArray(chapters)) {
+            chapters.forEach((ch: any, index: number) => {
+              const text = ch.name || ch.title || `Capítulo ${index + 1}`;
+              const href = ch.url || ch.slug;
+              if (href && isCleanChapter(text)) {
+                const cleanTitle = cleanChapterTitle(text, index + 1);
+                if (!titles.includes(cleanTitle)) {
+                  titles.push(cleanTitle);
+                  urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+                }
+              }
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('NovelBuddy AJAX error:', e);
+      }
+    }
+
+    // 2. Secondary: If AJAX API yielded no chapters, search if they are embedded in NEXT_DATA JSON
+    if (titles.length === 0 && nextDataObj) {
+      try {
+        const allArrays = findAllChaptersInObject(nextDataObj.props?.pageProps);
+        if (allArrays.length > 0) {
+          // Sort arrays in descending order of length to choose the longest list (the full chapters list)
+          allArrays.sort((a, b) => b.length - a.length);
+          const foundChapters = allArrays[0];
+          
+          foundChapters.forEach((ch: any, idx: number) => {
+            const text = ch.title || ch.name || ch.chapterName || ch.chapterTitle || `Capítulo ${idx + 1}`;
+            const slug = ch.slug || ch.href || ch.url || ch.chapterSlug || ch.id;
+            if (text && slug && isCleanChapter(text)) {
+              const href = slug.startsWith('/') || slug.startsWith('http') ? slug : `/${slug}`;
+              const cleanTitle = cleanChapterTitle(text, idx + 1);
               if (!titles.includes(cleanTitle)) {
                 titles.push(cleanTitle);
                 urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
@@ -364,20 +487,24 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
           });
         }
       } catch (e) {
-        console.warn('NovelBuddy AJAX error:', e);
+        // ignore
       }
     }
 
+    // 3. Fallback: Parse directly from HTML anchors if both AJAX and JSON extraction yielded nothing
     if (titles.length === 0) {
-      const anchors = root.querySelectorAll('a[href*="/chapter-"]');
-      anchors.forEach((el, index) => {
+      const pageAnchors = root.querySelectorAll('a[href*="/chapter-"]');
+      pageAnchors.forEach((el, index) => {
         const href = el.getAttribute('href');
-        const text = el.textContent?.trim() || `Capítulo ${index + 1}`;
         if (href) {
-          const cleanTitle = cleanChapterTitle(text, index + 1);
-          if (!titles.includes(cleanTitle)) {
-            titles.push(cleanTitle);
-            urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+          const textSpan = el.querySelector('span.text-\\[13\\.5px\\], span[class*="text-fg"], span[class*="group-hover:text-accent"]');
+          const text = textSpan?.textContent?.trim() || el.textContent?.trim() || `Capítulo ${index + 1}`;
+          if (isCleanChapter(text)) {
+            const cleanTitle = cleanChapterTitle(text, index + 1);
+            if (!titles.includes(cleanTitle)) {
+              titles.push(cleanTitle);
+              urls[cleanTitle] = normalizeUrl(href, normalizedUrl);
+            }
           }
         }
       });
@@ -599,9 +726,11 @@ export async function fetchChapterImagesReal(chapterUrl: string): Promise<string
       const data = await response.json();
       const baseUrl = data.baseUrl;
       const hash = data.chapter.hash;
-      const pageFilenames = data.chapter.data; // high-quality pages
+      // Use dataSaver array if available, otherwise fallback to high quality 'data'
+      const pageFilenames = data.chapter.dataSaver || data.chapter.data;
+      const pathType = data.chapter.dataSaver ? 'data-saver' : 'data';
 
-      return pageFilenames.map((filename: string) => `${baseUrl}/data/${hash}/${filename}`);
+      return pageFilenames.map((filename: string) => `${baseUrl}/${pathType}/${hash}/${filename}`);
     } catch (err: any) {
       console.warn('[DEBUG] MangaDex fetchChapterImagesReal error:', err.message);
       throw err;
@@ -1556,34 +1685,61 @@ export async function fetchNovelTextReal(chapterUrl: string): Promise<string[]> 
   const root = parse(html);
   const paragraphs: string[] = [];
 
-  const selectors = ['#chapter-container p', '.chapter-content p', '.reading-content p', 'div.themed-scroll p', 'div.txt p'];
-
-  let foundP: any[] = [];
-  for (const selector of selectors) {
-    const elements = root.querySelectorAll(selector);
-    if (elements.length > 0) {
-      foundP = elements;
-      break;
+  // Try extracting from Next.js __NEXT_DATA__ first
+  const nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+  if (nextDataMatch) {
+    try {
+      const nextData = JSON.parse(nextDataMatch[1]);
+      const chapter = nextData?.props?.pageProps?.chapter || {};
+      const content = chapter.content || chapter.body || nextData?.props?.pageProps?.content || '';
+      if (content && content.length > 50) {
+        // If content contains HTML tags like <p>, parse them. Otherwise split by newlines.
+        const cleanHtml = content.includes('<p>') ? content : content.split('\n').map((p: string) => `<p>${p}</p>`).join('');
+        const contentRoot = parse(cleanHtml);
+        const pElements = contentRoot.querySelectorAll('p');
+        pElements.forEach((p) => {
+          const text = p.textContent?.trim();
+          if (text && text.length > 2) {
+            paragraphs.push(text);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('Error parsing chapter __NEXT_DATA__:', e);
     }
   }
 
-  if (foundP.length === 0) {
-    const container = root.querySelector('.chapter-content, #chapter-container, div.txt, .reading-content');
-    if (container) {
-      foundP = container.querySelectorAll('p');
-    }
-  }
+  // Fallback to standard DOM selectors if __NEXT_DATA__ parsing didn't find paragraphs
+  if (paragraphs.length === 0) {
+    const selectors = ['#chapter-container p', '.chapter-content p', '.reading-content p', 'div.themed-scroll p', 'div.txt p'];
 
-  if (foundP.length === 0) {
-    foundP = root.querySelectorAll('p');
-  }
-
-  foundP.forEach((p) => {
-    const text = p.textContent?.trim();
-    if (text && text.length > 2) {
-      paragraphs.push(text);
+    let foundP: any[] = [];
+    for (const selector of selectors) {
+      const elements = root.querySelectorAll(selector);
+      if (elements.length > 0) {
+        foundP = elements;
+        break;
+      }
     }
-  });
+
+    if (foundP.length === 0) {
+      const container = root.querySelector('.chapter-content, #chapter-container, div.txt, .reading-content');
+      if (container) {
+        foundP = container.querySelectorAll('p');
+      }
+    }
+
+    if (foundP.length === 0) {
+      foundP = root.querySelectorAll('p');
+    }
+
+    foundP.forEach((p) => {
+      const text = p.textContent?.trim();
+      if (text && text.length > 2) {
+        paragraphs.push(text);
+      }
+    });
+  }
 
   if (paragraphs.length === 0) {
     throw new Error('Não foi possível extrair o texto do capítulo. O site pode estar protegido ou a estrutura mudou.');
