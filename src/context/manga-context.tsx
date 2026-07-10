@@ -483,7 +483,7 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   // Fetch latest updates whenever activeSource changes
   useEffect(() => {
     fetchLatestUpdates();
-    if (activeSource === 'NovelBuddy') {
+    if (activeSource === 'novelbuddy.com') {
       fetchTrendingNovels();
     } else {
       setTrendingNovels([]);

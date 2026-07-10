@@ -206,7 +206,7 @@ export default function HomeScreen() {
             {/* Dropdown Menu Overlay */}
             {showSourceSelector && (
               <ThemedView type="backgroundElement" style={styles.dropdownMenu}>
-                {['mangaread.org', 'asuracomics.net', 'NovelBuddy', 'MangaDex'].map((src) => {
+                {['mangaread.org', 'asuracomics.net', 'novelbuddy.com', 'mangadex.org'].map((src) => {
                   const isSelected = activeSource === src;
                   return (
                     <Pressable
@@ -295,7 +295,7 @@ export default function HomeScreen() {
               ListHeaderComponent={
                 <View>
                   {/* Trending Novels – only shown for NovelBuddy when not searching */}
-                  {activeSource === 'NovelBuddy' && searchInput.trim().length === 0 && (
+                  {activeSource === 'novelbuddy.com' && searchInput.trim().length === 0 && (
                     <View style={{ marginBottom: 16 }}>
                       <View style={[styles.headerContainer, { borderBottomColor: theme.backgroundSelected, marginBottom: 10 }]}>
                         <View style={[styles.headerMarker, { backgroundColor: '#f59e0b' }]} />

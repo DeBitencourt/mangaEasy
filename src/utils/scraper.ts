@@ -253,7 +253,7 @@ function parseChapterLinks(html: string, baseUrl: string): { titles: string[]; u
  * Fetches manga details from any supported source
  */
 export async function fetchMangaDetailsReal(url: string, source: string): Promise<ScrapedManga> {
-  if (source === 'MangaDex' || url.includes('mangadex.org')) {
+  if (source === 'mangadex.org' || url.includes('mangadex.org')) {
     try {
       const mangaId = url.split('/title/')[1]?.split('/')[0];
       if (!mangaId) {
@@ -889,7 +889,7 @@ async function searchMangaDexGlobal(query: string): Promise<SearchResult[]> {
         title,
         url: `https://mangadex.org/title/${mangaId}`,
         coverUrl,
-        source: 'MangaDex',
+        source: 'mangadex.org',
       });
     });
 
@@ -904,7 +904,7 @@ async function searchMangaDexGlobal(query: string): Promise<SearchResult[]> {
  * Searches manga on the active source
  */
 export async function searchMangaReal(query: string, source: string): Promise<SearchResult[]> {
-  if (source === 'MangaDex') {
+  if (source === 'mangadex.org') {
     return searchMangaDexGlobal(query);
   }
 
@@ -915,7 +915,7 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
 
 
 
-  if (source === 'NovelBuddy') {
+  if (source === 'novelbuddy.com') {
     return searchMangaNovelbuddy(query);
   }
 
@@ -1039,7 +1039,7 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
  * Fetches latest updates from the source homepage
  */
 export async function fetchLatestUpdatesReal(source: string, page: number = 1): Promise<SearchResult[]> {
-  if (source === 'MangaDex') {
+  if (source === 'mangadex.org') {
     try {
       const queryUrl = `https://api.mangadex.org/manga?limit=30&offset=${(page - 1) * 30}&order[latestUploadedChapter]=desc&includes[]=cover_art`;
       console.log('[DEBUG] fetchLatestUpdatesReal (MangaDex): Fetching URL:', queryUrl);
@@ -1074,7 +1074,7 @@ export async function fetchLatestUpdatesReal(source: string, page: number = 1): 
           title,
           url: `https://mangadex.org/title/${mangaId}`,
           coverUrl,
-          source: 'MangaDex',
+          source: 'mangadex.org',
         });
       });
 
@@ -1085,7 +1085,7 @@ export async function fetchLatestUpdatesReal(source: string, page: number = 1): 
     }
   }
 
-  if (source === 'NovelBuddy') {
+  if (source === 'novelbuddy.com') {
     try {
       const origin = 'https://novelbuddy.com';
       // Page 1 → /home (has latest section in __NEXT_DATA__)
@@ -1149,7 +1149,7 @@ export async function fetchLatestUpdatesReal(source: string, page: number = 1): 
           coverUrl,
           rating: item.rating ? String(item.rating) : undefined,
           chapters: chapters.length > 0 ? chapters : undefined,
-          source: 'NovelBuddy',
+          source: 'novelbuddy.com',
         } as SearchResult;
       });
     } catch (e: any) {
@@ -1450,7 +1450,7 @@ async function searchMangaNovelbuddy(query: string): Promise<SearchResult[]> {
               title: title.replace(/\s+/g, ' '),
               url: href.startsWith('http') ? href : `${origin}${href}`,
               coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-              source: 'NovelBuddy',
+              source: 'novelbuddy.com',
             });
           }
         });
@@ -1493,7 +1493,7 @@ async function searchMangaNovelbuddy(query: string): Promise<SearchResult[]> {
             title: title.replace(/\s+/g, ' '),
             url: href.startsWith('http') ? href : `${origin}${href}`,
             coverUrl: imgUrl || 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-            source: 'NovelBuddy',
+            source: 'novelbuddy.com',
           });
         }
       });
@@ -1510,7 +1510,7 @@ async function searchMangaNovelbuddy(query: string): Promise<SearchResult[]> {
             title: title.replace(/\s+/g, ' '),
             url: href.startsWith('http') ? href : `${origin}${href}`,
             coverUrl: 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80',
-            source: 'NovelBuddy',
+            source: 'novelbuddy.com',
           });
         }
       });
@@ -1642,7 +1642,7 @@ export async function fetchNovelBuddyTrending(): Promise<SearchResult[]> {
         title,
         url: `${origin}${href}`,
         coverUrl: imgSrc,
-        source: 'NovelBuddy',
+        source: 'novelbuddy.com',
       } as SearchResult);
 
       // The trending section only shows 10 items — stop once we have them
@@ -1884,7 +1884,7 @@ export async function searchMangaDex(title: string): Promise<any> {
       title: mangaTitle,
       coverUrl,
       synopsis,
-      source: 'MangaDex',
+      source: 'mangadex.org',
     };
   } catch (e: any) {
     console.warn('[DEBUG] searchMangaDex error:', e.message);
