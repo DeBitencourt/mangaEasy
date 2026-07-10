@@ -206,7 +206,7 @@ export default function HomeScreen() {
             {/* Dropdown Menu Overlay */}
             {showSourceSelector && (
               <ThemedView type="backgroundElement" style={styles.dropdownMenu}>
-                {['mangaread.org', 'asuracomics.net', 'NovelBuddy'].map((src) => {
+                {['mangaread.org', 'asuracomics.net', 'NovelBuddy', 'MangaDex'].map((src) => {
                   const isSelected = activeSource === src;
                   return (
                     <Pressable

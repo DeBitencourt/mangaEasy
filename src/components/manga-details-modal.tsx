@@ -52,6 +52,17 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
   const [isSourceDropdownOpen, setIsSourceDropdownOpen] = useState(false);
 
+  // Source states
+  const [readingSource, setReadingSource] = useState<'NovelBuddy' | 'NovelFull' | 'MangaDex'>('NovelBuddy');
+  const [loadingNovelFull, setLoadingNovelFull] = useState(false);
+  const [novelFullDetails, setNovelFullDetails] = useState<any>(null);
+  const [novelFullPage, setNovelFullPage] = useState(1);
+
+  // MangaDex states
+  const [loadingMangaDex, setLoadingMangaDex] = useState(false);
+  const [mangaDexDetails, setMangaDexDetails] = useState<any>(null);
+  const [mangaDexPage, setMangaDexPage] = useState(1);
+
   // Range selector state
   const [isRangeActive, setIsRangeActive] = useState(false);
   const [rangeStart, setRangeStart] = useState('');
@@ -78,8 +89,18 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setRangeStart('');
       setRangeEnd('');
       setIsSourceDropdownOpen(false);
+      
+      const isMangaDexSource = (mangaDetails as any)?.source === 'MangaDex';
+      setReadingSource(isMangaDexSource ? 'MangaDex' : 'NovelBuddy');
+
+      setNovelFullDetails(null);
+      setNovelFullPage(1);
+      setLoadingNovelFull(false);
+      setMangaDexDetails(null);
+      setMangaDexPage(1);
+      setLoadingMangaDex(false);
     }
-  }, [isOpen]);
+  }, [isOpen, mangaDetails]);
 
   // Load To Read, Favorite, and Last Read status
   useEffect(() => {
@@ -137,6 +158,100 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     }
   };
 
+  const loadNovelFullDetails = async (page: number = 1) => {
+    if (!mangaDetails) return;
+
+    // If we already have the full list loaded, just change page virtual offset in memory
+    if (novelFullDetails && novelFullDetails.chapters && novelFullDetails.chapters.length > 0) {
+      setNovelFullPage(page);
+      return;
+    }
+
+    setLoadingNovelFull(true);
+    setSelectedChapters([]);
+    try {
+      const { searchNovelFull, fetchNovelFullDetails, fetchNovelFullAllChapters } = require('@/utils/scraper');
+      let novelPath = null;
+      novelPath = await searchNovelFull(mangaDetails.title);
+
+      if (!novelPath) {
+        onShowToast('Nenhum resultado encontrado no NovelFull.', 'error');
+        setReadingSource('NovelBuddy');
+        setLoadingNovelFull(false);
+        return;
+      }
+
+      console.log(`[DEBUG] loadNovelFullDetails: fetching details and AJAX chapters for path: ${novelPath}`);
+      const [meta, allCh] = await Promise.all([
+        fetchNovelFullDetails(novelPath, 1),
+        fetchNovelFullAllChapters(novelPath),
+      ]);
+
+      const finalChapters = allCh.chapters && allCh.chapters.length > 0 ? allCh.chapters : meta.chapters;
+      const finalUrls = allCh.chapters && allCh.chapters.length > 0 ? allCh.chapterUrls : meta.chapterUrls;
+
+      const mergedDetails = {
+        ...meta,
+        chapters: finalChapters,
+        chapterUrls: finalUrls,
+        totalPages: Math.ceil(finalChapters.length / 50),
+      };
+
+      setNovelFullDetails(mergedDetails);
+      setNovelFullPage(page);
+    } catch (e: any) {
+      console.error('[DEBUG] loadNovelFullDetails error:', e);
+      onShowToast('Erro ao carregar capítulos do NovelFull.', 'error');
+      setReadingSource('NovelBuddy');
+    } finally {
+      setLoadingNovelFull(false);
+    }
+  };
+
+  const loadMangaDexDetails = async (page: number = 1) => {
+    if (!mangaDetails) return;
+
+    // Virtual page navigation in memory
+    if (mangaDexDetails && mangaDexDetails.chapters && mangaDexDetails.chapters.length > 0) {
+      setMangaDexPage(page);
+      return;
+    }
+
+    setLoadingMangaDex(true);
+    setSelectedChapters([]);
+    try {
+      const { searchMangaDex, fetchMangaDexChapters } = require('@/utils/scraper');
+      console.log(`[DEBUG] loadMangaDexDetails: searching MangaDex for: ${mangaDetails.title}`);
+      const meta = await searchMangaDex(mangaDetails.title);
+
+      if (!meta) {
+        onShowToast('Nenhum mangá correspondente encontrado no MangaDex.', 'error');
+        setReadingSource('NovelBuddy');
+        setLoadingMangaDex(false);
+        return;
+      }
+
+      console.log(`[DEBUG] loadMangaDexDetails: fetching chapters for MangaDex ID: ${meta.id}`);
+      const allCh = await fetchMangaDexChapters(meta.id);
+
+      const mergedDetails = {
+        ...meta,
+        chapters: allCh.chapters,
+        chapterUrls: allCh.chapterUrls,
+        totalPages: Math.ceil(allCh.chapters.length / 50),
+      };
+
+      setMangaDexDetails(mergedDetails);
+      setMangaDexPage(page);
+    } catch (e: any) {
+      console.error('[DEBUG] loadMangaDexDetails error:', e);
+      onShowToast('Erro ao carregar capítulos do MangaDex.', 'error');
+      setReadingSource('NovelBuddy');
+    } finally {
+      setLoadingMangaDex(false);
+    }
+  };
+
   // Set of numeric chapter numbers that are already downloaded locally
   const [downloadedNums, setDownloadedNums] = useState<Set<number>>(new Set());
 
@@ -186,7 +301,12 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
 
   const handleSelectAll = () => {
     if (!mangaDetails) return;
-    setSelectedChapters(mangaDetails.chapters.filter(ch => !isDownloaded(ch)));
+    const baseList = readingSource === 'NovelFull'
+      ? (novelFullDetails?.chapters || [])
+      : readingSource === 'MangaDex'
+        ? (mangaDexDetails?.chapters || [])
+        : mangaDetails.chapters;
+    setSelectedChapters(baseList.filter(ch => !isDownloaded(ch)));
   };
 
   const handleSelectNone = () => {
@@ -206,7 +326,13 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     const min = Math.min(startNum, endNum);
     const max = Math.max(startNum, endNum);
 
-    const matched = mangaDetails.chapters.filter((ch) => {
+    const baseList = readingSource === 'NovelFull'
+      ? (novelFullDetails?.chapters || [])
+      : readingSource === 'MangaDex'
+        ? (mangaDexDetails?.chapters || [])
+        : mangaDetails.chapters;
+
+    const matched = baseList.filter((ch) => {
       if (isDownloaded(ch)) return false;
       const match = ch.match(/\d+/);
       if (match) {
@@ -232,22 +358,61 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       onShowToast('Selecione pelo menos um capítulo para baixar.', 'error');
       return;
     }
-    startDownload(selectedChapters, selectedType || undefined);
+
+    if (readingSource === 'NovelFull' && novelFullDetails) {
+      startDownload(
+        selectedChapters,
+        'Novel',
+        {
+          title: novelFullDetails.title,
+          coverUrl: novelFullDetails.coverUrl,
+          synopsis: novelFullDetails.synopsis || mangaDetails?.synopsis || '',
+          chapterUrls: novelFullDetails.chapterUrls,
+          source: 'NovelFull',
+        }
+      );
+    } else if (readingSource === 'MangaDex' && mangaDexDetails) {
+      startDownload(
+        selectedChapters,
+        'Manga',
+        {
+          title: mangaDexDetails.title,
+          coverUrl: mangaDexDetails.coverUrl,
+          synopsis: mangaDexDetails.synopsis || mangaDetails?.synopsis || '',
+          chapterUrls: mangaDexDetails.chapterUrls,
+          source: 'MangaDex',
+        }
+      );
+    } else {
+      startDownload(selectedChapters, selectedType || undefined);
+    }
+    
     onClose();
     onShowToast('Download iniciado! Acompanhe na aba Downloads.', 'success');
     setSelectedChapters([]);
   };
 
   // Filter chapters by search input
-  const filteredChapters = mangaDetails
-    ? mangaDetails.chapters.filter((ch) =>
-        ch.toLowerCase().includes(searchChapter.toLowerCase())
-      )
-    : [];
+  const baseChapters = readingSource === 'NovelFull'
+    ? (novelFullDetails?.chapters || [])
+    : readingSource === 'MangaDex'
+      ? (mangaDexDetails?.chapters || mangaDetails?.chapters || [])
+      : (mangaDetails?.chapters || []);
 
-  const displayedChapters = sortAscending
+  const filteredChapters = baseChapters.filter((ch) =>
+    ch.toLowerCase().includes(searchChapter.toLowerCase())
+  );
+
+  const displayedChaptersFull = sortAscending
     ? [...filteredChapters].reverse()
     : filteredChapters;
+
+  const displayedChapters = (readingSource === 'NovelFull' || readingSource === 'MangaDex')
+    ? displayedChaptersFull.slice(
+        ((readingSource === 'NovelFull' ? novelFullPage : mangaDexPage) - 1) * 50,
+        (readingSource === 'NovelFull' ? novelFullPage : mangaDexPage) * 50
+      )
+    : displayedChaptersFull;
 
   return (
     <>
@@ -387,75 +552,149 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                       </Pressable>
                     </View>
 
-
-
-                    {/* Custom Type Override Dropdown */}
-                    {!mangaDetails.source?.toLowerCase().includes('asura') && (
-                      <View style={{ position: 'relative', marginTop: 6, zIndex: 10 }}>
-                        <Pressable
-                          onPress={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)}
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            backgroundColor: theme.backgroundSelected,
-                            paddingVertical: 4,
-                            paddingHorizontal: 8,
-                            borderRadius: 6,
-                            borderWidth: 0.5,
-                            borderColor: theme.accent,
-                            minWidth: 100,
-                          }}>
-                          <ThemedText type="code" style={{ fontSize: 11, color: theme.text }}>
-                            {selectedType || 'Tipo: Auto'}
-                          </ThemedText>
-                          <SymbolView name="chevron.down" size={8} tintColor={theme.text} style={{ marginLeft: 6 }} />
-                        </Pressable>
-
-                        {isTypeDropdownOpen && (
-                          <ThemedView
-                            type="backgroundElement"
+                    {/* Custom Override and Source Selector Row */}
+                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 6, zIndex: 10 }}>
+                      {!mangaDetails.source?.toLowerCase().includes('asura') && (
+                        <View style={{ position: 'relative', zIndex: 15 }}>
+                          <Pressable
+                            onPress={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)}
                             style={{
-                              position: 'absolute',
-                              top: 28,
-                              left: 0,
-                              right: 0,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              backgroundColor: theme.backgroundSelected,
+                              paddingVertical: 4,
+                              paddingHorizontal: 8,
                               borderRadius: 6,
                               borderWidth: 0.5,
-                              borderColor: theme.backgroundSelected,
-                              shadowColor: '#000',
-                              shadowOffset: { width: 0, height: 2 },
-                              shadowOpacity: 0.2,
-                              shadowRadius: 3,
-                              elevation: 4,
-                              zIndex: 1000,
+                              borderColor: theme.accent,
+                              minWidth: 100,
                             }}>
-                            {['', 'Manga', 'Manhwa', 'Manhua', 'Novel'].map((typeOption) => {
-                              const isOptionSelected = selectedType === typeOption;
-                              return (
-                                <Pressable
-                                  key={typeOption || 'auto'}
-                                  onPress={() => {
-                                    setSelectedType(typeOption);
-                                    setIsTypeDropdownOpen(false);
-                                  }}
-                                  style={{
-                                    paddingVertical: 6,
-                                    paddingHorizontal: 8,
-                                    borderBottomWidth: typeOption === 'Novel' ? 0 : 0.5,
-                                    borderBottomColor: theme.backgroundSelected,
-                                    backgroundColor: isOptionSelected ? theme.backgroundSelected : undefined,
-                                  }}>
-                                  <ThemedText type="small" style={{ fontSize: 11, color: isOptionSelected ? theme.accent : theme.text }}>
-                                    {typeOption || 'Auto (Padrão)'}
-                                  </ThemedText>
-                                </Pressable>
-                              );
-                            })}
-                          </ThemedView>
-                        )}
-                      </View>
-                    )}
+                            <ThemedText type="code" style={{ fontSize: 11, color: theme.text }}>
+                              {selectedType || 'Tipo: Auto'}
+                            </ThemedText>
+                            <SymbolView name="chevron.down" size={8} tintColor={theme.text} style={{ marginLeft: 6 }} />
+                          </Pressable>
+
+                          {isTypeDropdownOpen && (
+                            <ThemedView
+                              type="backgroundElement"
+                              style={{
+                                position: 'absolute',
+                                top: 28,
+                                left: 0,
+                                right: 0,
+                                borderRadius: 6,
+                                borderWidth: 0.5,
+                                borderColor: theme.backgroundSelected,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                elevation: 4,
+                                zIndex: 1000,
+                                minWidth: 100,
+                              }}>
+                              {['', 'Manga', 'Manhwa', 'Manhua', 'Novel'].map((typeOption) => {
+                                const isOptionSelected = selectedType === typeOption;
+                                return (
+                                  <Pressable
+                                    key={typeOption || 'auto'}
+                                    onPress={() => {
+                                      setSelectedType(typeOption);
+                                      setIsTypeDropdownOpen(false);
+                                    }}
+                                    style={{
+                                      paddingVertical: 6,
+                                      paddingHorizontal: 8,
+                                      borderBottomWidth: typeOption === 'Novel' ? 0 : 0.5,
+                                      borderBottomColor: theme.backgroundSelected,
+                                      backgroundColor: isOptionSelected ? theme.backgroundSelected : undefined,
+                                    }}>
+                                    <ThemedText type="small" style={{ fontSize: 11, color: isOptionSelected ? theme.accent : theme.text }}>
+                                      {typeOption || 'Auto (Padrão)'}
+                                    </ThemedText>
+                                  </Pressable>
+                                );
+                              })}
+                            </ThemedView>
+                          )}
+                        </View>
+                      )}
+
+                      {mangaDetails.source === 'NovelBuddy' && (
+                        <View style={{ position: 'relative', zIndex: 20 }}>
+                          <Pressable
+                            onPress={() => setIsSourceDropdownOpen(!isSourceDropdownOpen)}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              backgroundColor: theme.backgroundSelected,
+                              paddingVertical: 4,
+                              paddingHorizontal: 8,
+                              borderRadius: 6,
+                              borderWidth: 0.5,
+                              borderColor: theme.accent,
+                              minWidth: 120,
+                            }}>
+                            <ThemedText type="code" style={{ fontSize: 11, color: theme.text, fontWeight: 'bold' }}>
+                              Fonte: {readingSource}
+                            </ThemedText>
+                            <SymbolView name="chevron.down" size={8} tintColor={theme.text} style={{ marginLeft: 6 }} />
+                          </Pressable>
+
+                          {isSourceDropdownOpen && (
+                            <ThemedView
+                              type="backgroundElement"
+                              style={{
+                                position: 'absolute',
+                                top: 28,
+                                left: 0,
+                                right: 0,
+                                borderRadius: 6,
+                                borderWidth: 0.5,
+                                borderColor: theme.backgroundSelected,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                elevation: 4,
+                                zIndex: 1000,
+                                minWidth: 120,
+                              }}>
+                              {['NovelBuddy', 'NovelFull', 'MangaDex'].map((src) => {
+                                const isOptionSelected = readingSource === src;
+                                return (
+                                  <Pressable
+                                    key={src}
+                                    onPress={() => {
+                                      setReadingSource(src as any);
+                                      setIsSourceDropdownOpen(false);
+                                      if (src === 'NovelFull' && !novelFullDetails) {
+                                        loadNovelFullDetails(1);
+                                      } else if (src === 'MangaDex' && !mangaDexDetails) {
+                                        loadMangaDexDetails(1);
+                                      }
+                                    }}
+                                    style={{
+                                      paddingVertical: 6,
+                                      paddingHorizontal: 8,
+                                      borderBottomWidth: src === 'MangaDex' ? 0 : 0.5,
+                                      borderBottomColor: theme.backgroundSelected,
+                                      backgroundColor: isOptionSelected ? theme.backgroundSelected : undefined,
+                                    }}>
+                                    <ThemedText type="small" style={{ fontSize: 11, color: isOptionSelected ? theme.accent : theme.text }}>
+                                      {src}
+                                    </ThemedText>
+                                  </Pressable>
+                                );
+                              })}
+                            </ThemedView>
+                          )}
+                        </View>
+                      )}
+                    </View>
                   </View>
                 </View>
 
@@ -499,7 +738,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                 {/* Selection Header */}
                 <View style={styles.selectionControls}>
                   <ThemedText type="smallBold">
-                    Capítulos ({selectedChapters.length}/{mangaDetails.chapters.length})
+                    Capítulos ({selectedChapters.length}/{baseChapters.length})
                   </ThemedText>
                   <View style={styles.bulkButtons}>
                     <Pressable onPress={handleSelectAll} style={sharedStyles.actionPill}>
@@ -583,83 +822,136 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                 </View>
 
                 {/* Chapters List */}
-                <ScrollView
-                  style={styles.chaptersListWrapper}
-                  contentContainerStyle={styles.chaptersListContent}
-                  nestedScrollEnabled={true}
-                  showsVerticalScrollIndicator={true}>
-                  {displayedChapters.map((item, idx) => {
-                    const isChecked = selectedChapters.includes(item);
-                    const alreadyDownloaded = isDownloaded(item);
-                    return (
-                      <Pressable
-                        key={`${item}-${idx}`}
-                        onPress={() => toggleChapter(item)}
-                        disabled={alreadyDownloaded}
-                        style={[
-                          styles.chapterRow,
-                          {
-                            backgroundColor: alreadyDownloaded
-                              ? 'rgba(76, 175, 80, 0.08)'
-                              : isChecked ? theme.backgroundSelected : theme.background,
-                            borderColor: alreadyDownloaded
-                              ? 'rgba(76, 175, 80, 0.3)'
-                              : isChecked ? theme.accent : theme.backgroundSelected,
-                          },
-                        ]}>
-                        <ThemedText
-                          type="small"
-                          style={{
-                            color: alreadyDownloaded ? '#4CAF50' : isChecked ? theme.text : theme.textSecondary,
-                            flex: 1,
-                          }}>
-                          {item}
-                        </ThemedText>
+                {loadingNovelFull || loadingMangaDex ? (
+                  <View style={{ height: 200, justifyContent: 'center', alignItems: 'center', gap: 8 }}>
+                    <ActivityIndicator size="large" color={theme.accent} />
+                    <ThemedText type="small" themeColor="textSecondary">
+                      {loadingMangaDex ? 'Buscando capítulos no MangaDex...' : 'Buscando capítulos no NovelFull...'}
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <>
+                    <ScrollView
+                      style={styles.chaptersListWrapper}
+                      contentContainerStyle={styles.chaptersListContent}
+                      nestedScrollEnabled={true}
+                      showsVerticalScrollIndicator={true}>
+                      {displayedChapters.map((item, idx) => {
+                        const isChecked = selectedChapters.includes(item);
+                        const alreadyDownloaded = isDownloaded(item);
+                        const hasUrl = readingSource === 'NovelFull'
+                          ? !!novelFullDetails?.chapterUrls?.[item]
+                          : readingSource === 'MangaDex'
+                            ? !!(mangaDexDetails?.chapterUrls?.[item] || mangaDetails?.chapterUrls?.[item])
+                            : !!mangaDetails?.chapterUrls?.[item];
 
-                        {/* Ler Online button */}
-                        {mangaDetails?.chapterUrls?.[item] && (
+                        return (
                           <Pressable
-                            onPress={(e) => { e.stopPropagation(); openOnlineReader(item); }}
-                            style={{
-                              marginRight: 6,
-                              padding: 4,
-                              borderRadius: 6,
-                              backgroundColor: 'rgba(79, 195, 247, 0.12)',
-                            }}
-                          >
-                            <SymbolView name="eye.fill" size={13} tintColor="#4fc3f7" />
-                          </Pressable>
-                        )}
-
-                        {alreadyDownloaded ? (
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <ThemedText type="code" style={{ fontSize: 9, color: '#4CAF50' }}>
-                              Baixado
+                            key={`${item}-${idx}`}
+                            onPress={() => toggleChapter(item)}
+                            disabled={alreadyDownloaded}
+                            style={[
+                              styles.chapterRow,
+                              {
+                                backgroundColor: alreadyDownloaded
+                                  ? 'rgba(76, 175, 80, 0.08)'
+                                  : isChecked ? theme.backgroundSelected : theme.background,
+                                borderColor: alreadyDownloaded
+                                  ? 'rgba(76, 175, 80, 0.3)'
+                                  : isChecked ? theme.accent : theme.backgroundSelected,
+                              },
+                            ]}>
+                            <ThemedText
+                              type="small"
+                              style={{
+                                color: alreadyDownloaded ? '#4CAF50' : isChecked ? theme.text : theme.textSecondary,
+                                flex: 1,
+                              }}>
+                              {item}
                             </ThemedText>
-                            <SymbolView
-                              name="checkmark.circle.fill"
-                              size={16}
-                              tintColor="#4CAF50"
-                            />
-                          </View>
-                        ) : (
-                          <SymbolView
-                            name={isChecked ? 'checkmark.square.fill' : 'square'}
-                            size={16}
-                            tintColor={isChecked ? theme.accent : theme.textSecondary}
-                          />
-                        )}
-                      </Pressable>
-                    );
-                  })}
-                  {displayedChapters.length === 0 && (
-                    <View style={styles.emptyChapters}>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        Nenhum capítulo encontrado.
-                      </ThemedText>
-                    </View>
-                  )}
-                </ScrollView>
+
+                            {/* Ler Online button */}
+                            {hasUrl && (
+                              <Pressable
+                                onPress={(e) => { e.stopPropagation(); openOnlineReader(item); }}
+                                style={{
+                                  marginRight: 6,
+                                  padding: 4,
+                                  borderRadius: 6,
+                                  backgroundColor: 'rgba(79, 195, 247, 0.12)',
+                                }}
+                              >
+                                <SymbolView name="eye.fill" size={13} tintColor="#4fc3f7" />
+                              </Pressable>
+                            )}
+
+                            {alreadyDownloaded ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <ThemedText type="code" style={{ fontSize: 9, color: '#4CAF50' }}>
+                                  Baixado
+                                </ThemedText>
+                                <SymbolView
+                                  name="checkmark.circle.fill"
+                                  size={16}
+                                  tintColor="#4CAF50"
+                                />
+                              </View>
+                            ) : (
+                              <SymbolView
+                                name={isChecked ? 'checkmark.square.fill' : 'square'}
+                                size={16}
+                                tintColor={isChecked ? theme.accent : theme.textSecondary}
+                              />
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                      {displayedChapters.length === 0 && (
+                        <View style={styles.emptyChapters}>
+                          <ThemedText type="small" themeColor="textSecondary">
+                            Nenhum capítulo encontrado.
+                          </ThemedText>
+                        </View>
+                      )}
+                    </ScrollView>
+
+                    {/* Source Pagination (NovelFull & MangaDex) */}
+                    {((readingSource === 'NovelFull' && novelFullDetails && novelFullDetails.totalPages > 1) ||
+                      (readingSource === 'MangaDex' && mangaDexDetails && mangaDexDetails.totalPages > 1)) && (
+                      <View style={{ flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginVertical: 12, gap: 16 }}>
+                        <Pressable
+                          disabled={(readingSource === 'NovelFull' ? novelFullPage === 1 : mangaDexPage === 1) || loadingNovelFull || loadingMangaDex}
+                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage - 1) : loadMangaDexDetails(mangaDexPage - 1)}
+                          style={({ pressed }) => ({
+                            paddingVertical: 6,
+                            paddingHorizontal: 12,
+                            borderRadius: 6,
+                            backgroundColor: theme.backgroundSelected,
+                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === 1 : mangaDexPage === 1) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
+                          })}
+                        >
+                          <ThemedText type="smallBold">{"< Anterior"}</ThemedText>
+                        </Pressable>
+                        <ThemedText type="smallBold">
+                          Pág. {readingSource === 'NovelFull' ? novelFullPage : mangaDexPage} / {readingSource === 'NovelFull' ? novelFullDetails.totalPages : mangaDexDetails.totalPages}
+                        </ThemedText>
+                        <Pressable
+                          disabled={(readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : mangaDexPage === mangaDexDetails.totalPages) || loadingNovelFull || loadingMangaDex}
+                          onPress={() => readingSource === 'NovelFull' ? loadNovelFullDetails(novelFullPage + 1) : loadMangaDexDetails(mangaDexPage + 1)}
+                          style={({ pressed }) => ({
+                            paddingVertical: 6,
+                            paddingHorizontal: 12,
+                            borderRadius: 6,
+                            backgroundColor: theme.backgroundSelected,
+                            opacity: ((readingSource === 'NovelFull' ? novelFullPage === novelFullDetails.totalPages : mangaDexPage === mangaDexDetails.totalPages) || loadingNovelFull || loadingMangaDex) ? 0.4 : pressed ? 0.7 : 1,
+                          })}
+                        >
+                          <ThemedText type="smallBold">{"Próxima >"}</ThemedText>
+                        </Pressable>
+                      </View>
+                    )}
+                  </>
+                )}
 
                 {/* Download Action Button */}
                 {selectedChapters.length > 0 && (
@@ -689,10 +981,34 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
           setIsOnlineReaderOpen(false);
           setOnlineReaderChapter(null);
         }}
-        mangaTitle={mangaDetails.title}
-        mangaType={selectedType || (mangaDetails as any).mangaType}
-        chapters={mangaDetails.chapters}
-        chapterUrls={mangaDetails.chapterUrls || {}}
+        mangaTitle={
+          readingSource === 'NovelFull' && novelFullDetails
+            ? novelFullDetails.title
+            : readingSource === 'MangaDex' && mangaDexDetails
+              ? mangaDexDetails.title
+              : mangaDetails.title
+        }
+        mangaType={
+          readingSource === 'NovelFull'
+            ? 'Novel'
+            : readingSource === 'MangaDex'
+              ? 'Manga'
+              : (selectedType || (mangaDetails as any).mangaType)
+        }
+        chapters={
+          readingSource === 'NovelFull' && novelFullDetails
+            ? novelFullDetails.chapters
+            : readingSource === 'MangaDex' && mangaDexDetails
+              ? mangaDexDetails.chapters
+              : mangaDetails.chapters
+        }
+        chapterUrls={
+          readingSource === 'NovelFull' && novelFullDetails
+            ? (novelFullDetails.chapterUrls || {})
+            : readingSource === 'MangaDex' && mangaDexDetails
+              ? (mangaDexDetails.chapterUrls || {})
+              : (mangaDetails.chapterUrls || {})
+        }
         initialChapter={onlineReaderChapter}
       />
     )}

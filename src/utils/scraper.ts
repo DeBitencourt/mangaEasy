@@ -253,6 +253,45 @@ function parseChapterLinks(html: string, baseUrl: string): { titles: string[]; u
  * Fetches manga details from any supported source
  */
 export async function fetchMangaDetailsReal(url: string, source: string): Promise<ScrapedManga> {
+  if (source === 'MangaDex' || url.includes('mangadex.org')) {
+    try {
+      const mangaId = url.split('/title/')[1]?.split('/')[0];
+      if (!mangaId) {
+        throw new Error('ID do MangaDex não pôde ser extraído da URL.');
+      }
+      
+      const allCh = await fetchMangaDexChapters(mangaId);
+      const queryUrl = `https://api.mangadex.org/manga/${mangaId}?includes[]=cover_art`;
+      const response = await fetch(queryUrl, { headers: DEFAULT_HEADERS });
+      if (!response.ok) {
+        throw new Error(`Erro ao obter detalhes do MangaDex (status ${response.status})`);
+      }
+      const json = await response.json();
+      const manga = json.data;
+      const title = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
+      const synopsis = manga.attributes.description.en || Object.values(manga.attributes.description)[0] || '';
+      
+      const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+      const fileName = coverArtRel?.attributes?.fileName;
+      let coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+      if (fileName) {
+        coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+      }
+
+      return {
+        title,
+        coverUrl,
+        synopsis,
+        chapters: allCh.chapters,
+        chapterUrls: allCh.chapterUrls,
+        mangaType: 'Manga',
+      };
+    } catch (err: any) {
+      console.warn('[DEBUG] MangaDex fetchMangaDetailsReal error:', err.message);
+      throw err;
+    }
+  }
+
   const normalizedUrl = normalizeMangaUrl(url);
 
   const isNovelBuddy = normalizedUrl.includes('novelbuddy.com') || normalizedUrl.includes('novelbuddy.io');
@@ -550,6 +589,25 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
  * Fetches all image URLs from a chapter page
  */
 export async function fetchChapterImagesReal(chapterUrl: string): Promise<string[]> {
+  if (chapterUrl.startsWith('mangadex://')) {
+    try {
+      const chapterId = chapterUrl.replace('mangadex://', '');
+      const response = await fetch(`https://api.mangadex.org/at-home/server/${chapterId}`);
+      if (!response.ok) {
+        throw new Error(`Erro ao buscar imagens no servidor MangaDex (status ${response.status})`);
+      }
+      const data = await response.json();
+      const baseUrl = data.baseUrl;
+      const hash = data.chapter.hash;
+      const pageFilenames = data.chapter.data; // high-quality pages
+
+      return pageFilenames.map((filename: string) => `${baseUrl}/data/${hash}/${filename}`);
+    } catch (err: any) {
+      console.warn('[DEBUG] MangaDex fetchChapterImagesReal error:', err.message);
+      throw err;
+    }
+  }
+
   const normalizedUrl = normalizeMangaUrl(chapterUrl);
   const html = await fetchHtml(normalizedUrl);
   const root = parse(html);
@@ -794,9 +852,62 @@ async function searchMangaAsura(query: string): Promise<SearchResult[]> {
 }
 
 /**
+ * Searches a manga on MangaDex and returns SearchResult array
+ */
+async function searchMangaDexGlobal(query: string): Promise<SearchResult[]> {
+  try {
+    const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=20&includes[]=cover_art`;
+    console.log('[DEBUG] searchMangaDexGlobal: Fetching URL:', queryUrl);
+    const response = await fetch(queryUrl, {
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
+    console.log('[DEBUG] searchMangaDexGlobal: Status code:', response.status);
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn('[DEBUG] searchMangaDexGlobal: Error response body:', errText);
+      return [];
+    }
+    const json = await response.json();
+    const dataList = json.data || [];
+    console.log(`[DEBUG] searchMangaDexGlobal: Returned ${dataList.length} items.`);
+    const results: SearchResult[] = [];
+
+    dataList.forEach((manga: any) => {
+      const mangaId = manga.id;
+      const title = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
+      
+      const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+      const fileName = coverArtRel?.attributes?.fileName;
+      let coverUrl = '';
+      if (fileName) {
+        coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+      }
+
+      results.push({
+        title,
+        url: `https://mangadex.org/title/${mangaId}`,
+        coverUrl,
+        source: 'MangaDex',
+      });
+    });
+
+    return results;
+  } catch (e: any) {
+    console.error('[DEBUG] searchMangaDexGlobal error stack:', e.stack || e.message || e);
+    return [];
+  }
+}
+
+/**
  * Searches manga on the active source
  */
 export async function searchMangaReal(query: string, source: string): Promise<SearchResult[]> {
+  if (source === 'MangaDex') {
+    return searchMangaDexGlobal(query);
+  }
+
   // Dispatch to source-specific search
   if (source.includes('asura')) {
     return searchMangaAsura(query);
@@ -928,7 +1039,51 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
  * Fetches latest updates from the source homepage
  */
 export async function fetchLatestUpdatesReal(source: string, page: number = 1): Promise<SearchResult[]> {
+  if (source === 'MangaDex') {
+    try {
+      const queryUrl = `https://api.mangadex.org/manga?limit=30&offset=${(page - 1) * 30}&order[latestUploadedChapter]=desc&includes[]=cover_art`;
+      console.log('[DEBUG] fetchLatestUpdatesReal (MangaDex): Fetching URL:', queryUrl);
+      const response = await fetch(queryUrl, {
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      console.log('[DEBUG] fetchLatestUpdatesReal (MangaDex): Status code:', response.status);
+      if (!response.ok) {
+        const errText = await response.text();
+        console.warn('[DEBUG] fetchLatestUpdatesReal (MangaDex): Error response body:', errText);
+        return [];
+      }
+      const json = await response.json();
+      const dataList = json.data || [];
+      console.log(`[DEBUG] fetchLatestUpdatesReal (MangaDex): Returned ${dataList.length} items.`);
+      const results: SearchResult[] = [];
 
+      dataList.forEach((manga: any) => {
+        const mangaId = manga.id;
+        const title = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
+        
+        const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+        const fileName = coverArtRel?.attributes?.fileName;
+        let coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+        if (fileName) {
+          coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+        }
+
+        results.push({
+          title,
+          url: `https://mangadex.org/title/${mangaId}`,
+          coverUrl,
+          source: 'MangaDex',
+        });
+      });
+
+      return results;
+    } catch (e: any) {
+      console.error('[DEBUG] fetchLatestUpdatesReal (MangaDex) error stack:', e.stack || e.message || e);
+      return [];
+    }
+  }
 
   if (source === 'NovelBuddy') {
     try {
@@ -1500,3 +1655,307 @@ export async function fetchNovelBuddyTrending(): Promise<SearchResult[]> {
     return [];
   }
 }
+
+/**
+ * Searches for a novel on NovelFull and returns the relative path of the first match
+ */
+export async function searchNovelFull(title: string): Promise<string | null> {
+  try {
+    const origin = 'https://novelfull.com';
+    const searchUrl = `${origin}/search?keyword=${encodeURIComponent(title)}`;
+    const html = await fetchHtml(searchUrl);
+    const root = parse(html);
+
+    // The first result's anchor element
+    const firstTitleLink = root.querySelector('.truyen-title a, .title a, .list-truyen .truyen-title a');
+    if (firstTitleLink) {
+      const href = firstTitleLink.getAttribute('href');
+      if (href) {
+        return href;
+      }
+    }
+    return null;
+  } catch (e: any) {
+    console.warn('[DEBUG] searchNovelFull error:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Fetches novel info, paginated chapter names, and chapter URLs from NovelFull
+ */
+export async function fetchNovelFullDetails(novelUrl: string, page: number = 1): Promise<any> {
+  try {
+    const origin = 'https://novelfull.com';
+    const targetUrl = novelUrl.startsWith('http') 
+      ? `${novelUrl}${novelUrl.includes('?') ? '&' : '?'}page=${page}`
+      : `${origin}${novelUrl}${novelUrl.includes('?') ? '&' : '?'}page=${page}`;
+
+    const html = await fetchHtml(targetUrl);
+    const root = parse(html);
+
+    // Meta details
+    const titleEl = root.querySelector('.books .desc .title, h3.title, .title-list .title');
+    const title = titleEl?.textContent?.trim() || 'NovelFull Title';
+
+    const imgEl = root.querySelector('.book img, .info-holder .book img');
+    let coverUrl = imgEl?.getAttribute('src') || '';
+    if (coverUrl && coverUrl.startsWith('/')) {
+      coverUrl = `${origin}${coverUrl}`;
+    }
+
+    // Synopsis
+    const descEl = root.querySelector('.desc-text, .desc-text p');
+    const synopsis = descEl?.textContent?.trim() || '';
+
+    // Chapters list (50 chapters per page)
+    const chapterLinks = root.querySelectorAll('ul.list-chapter li a, .list-chapter li a');
+    const chapters: string[] = [];
+    const chapterUrls: Record<string, string> = {};
+
+    chapterLinks.forEach((link) => {
+      let chTitle = link.textContent?.trim() || '';
+      chTitle = cleanChapterTitle(chTitle);
+      
+      let href = link.getAttribute('href') || '';
+      if (href && !href.startsWith('http')) {
+        href = `${origin}${href}`;
+      }
+
+      if (chTitle && href) {
+        if (!chapters.includes(chTitle)) {
+          chapters.push(chTitle);
+          chapterUrls[chTitle] = href;
+        }
+      }
+    });
+
+    // Extract total pages of chapters
+    let totalPages = 1;
+    const lastPageEl = root.querySelector('.pagination li.last a');
+    if (lastPageEl) {
+      const dataPage = lastPageEl.getAttribute('data-page');
+      if (dataPage) {
+        totalPages = parseInt(dataPage, 10) + 1;
+      } else {
+        const href = lastPageEl.getAttribute('href') || '';
+        const match = href.match(/[?&]page=(\d+)/);
+        if (match) {
+          totalPages = parseInt(match[1], 10);
+        }
+      }
+    } else {
+      const pageLinks = root.querySelectorAll('.pagination li a');
+      pageLinks.forEach((pLink) => {
+        const pageText = pLink.textContent?.trim();
+        const pNum = parseInt(pageText || '', 10);
+        if (!isNaN(pNum) && pNum > totalPages) {
+          totalPages = pNum;
+        }
+      });
+    }
+
+    return {
+      title,
+      coverUrl,
+      synopsis,
+      chapters,
+      chapterUrls,
+      totalPages,
+      source: 'NovelFull',
+      url: novelUrl.startsWith('http') ? novelUrl : `${origin}${novelUrl}`
+    };
+  } catch (e: any) {
+    console.warn('[DEBUG] fetchNovelFullDetails error:', e.message);
+    throw e;
+  }
+}
+
+/**
+ * Fetches ALL chapters for a given NovelFull novel URL by retrieving the novelId
+ * from its detail page and querying the ajax-chapter-option endpoint.
+ */
+export async function fetchNovelFullAllChapters(novelUrl: string): Promise<{ chapters: string[], chapterUrls: Record<string, string> }> {
+  try {
+    const origin = 'https://novelfull.com';
+    const targetUrl = novelUrl.startsWith('http') ? novelUrl : `${origin}${novelUrl}`;
+    const html = await fetchHtml(targetUrl);
+    const root = parse(html);
+
+    // Extract novel ID
+    const ratingEl = root.querySelector('#rating');
+    const novelId = ratingEl?.getAttribute('data-novel-id');
+
+    if (!novelId) {
+      console.warn('[DEBUG] fetchNovelFullAllChapters: data-novel-id not found on page');
+      return { chapters: [], chapterUrls: {} };
+    }
+
+    console.log(`[DEBUG] fetchNovelFullAllChapters: Found novelId = ${novelId}. Fetching all chapters via AJAX...`);
+
+    // Fetch all chapters from the AJAX options endpoint
+    let ajaxUrl = `${origin}/ajax-chapter-option`;
+    let response = await fetch(ajaxUrl, {
+      method: 'POST',
+      headers: {
+        ...DEFAULT_HEADERS,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': targetUrl,
+      },
+      body: `novelId=${novelId}`
+    });
+
+    if (!response.ok) {
+      // Fallback: try GET
+      response = await fetch(`${ajaxUrl}?novelId=${novelId}`, {
+        method: 'GET',
+        headers: {
+          ...DEFAULT_HEADERS,
+          'Referer': targetUrl,
+        }
+      });
+    }
+
+    if (!response.ok) {
+      throw new Error(`AJAX request failed with status: ${response.status}`);
+    }
+
+    const ajaxHtml = await response.text();
+    const ajaxRoot = parse(ajaxHtml);
+    const optionElements = ajaxRoot.querySelectorAll('option');
+
+    const chapters: string[] = [];
+    const chapterUrls: Record<string, string> = {};
+
+    optionElements.forEach((option) => {
+      let chTitle = option.textContent?.trim() || '';
+      chTitle = cleanChapterTitle(chTitle);
+      
+      let href = option.getAttribute('value') || '';
+      if (href && !href.startsWith('http')) {
+        href = `${origin}${href}`;
+      }
+
+      if (chTitle && href) {
+        if (!chapters.includes(chTitle)) {
+          chapters.push(chTitle);
+          chapterUrls[chTitle] = href;
+        }
+      }
+    });
+
+    console.log(`[DEBUG] fetchNovelFullAllChapters: Successfully parsed ${chapters.length} chapters.`);
+    return { chapters, chapterUrls };
+  } catch (e: any) {
+    console.warn('[DEBUG] fetchNovelFullAllChapters error:', e.message);
+    return { chapters: [], chapterUrls: {} };
+  }
+}
+
+/**
+ * Searches a manga on MangaDex and returns its metadata
+ */
+export async function searchMangaDex(title: string): Promise<any> {
+  try {
+    const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=5&includes[]=cover_art`;
+    const response = await fetch(queryUrl, { headers: DEFAULT_HEADERS });
+    if (!response.ok) {
+      throw new Error(`MangaDex search failed (status ${response.status})`);
+    }
+    const json = await response.json();
+    const dataList = json.data || [];
+    if (dataList.length === 0) return null;
+
+    const manga = dataList[0];
+    const mangaId = manga.id;
+    const mangaTitle = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
+    const synopsis = manga.attributes.description.en || Object.values(manga.attributes.description)[0] || '';
+
+    // Find cover art file name from expanded relationships
+    const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+    const fileName = coverArtRel?.attributes?.fileName;
+    let coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+    if (fileName) {
+      coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+    }
+
+    return {
+      id: mangaId,
+      title: mangaTitle,
+      coverUrl,
+      synopsis,
+      source: 'MangaDex',
+    };
+  } catch (e: any) {
+    console.warn('[DEBUG] searchMangaDex error:', e.message);
+    return null;
+  }
+}
+
+/**
+ * Fetches all chapters from MangaDex in Portuguese (pt-br) and English (en)
+ */
+export async function fetchMangaDexChapters(mangaId: string): Promise<{ chapters: string[], chapterUrls: Record<string, string> }> {
+  try {
+    const chapters: string[] = [];
+    const chapterUrls: Record<string, string> = {};
+    const seenChapters = new Set<string>();
+
+    let offset = 0;
+    let total = 1;
+
+    console.log(`[DEBUG] fetchMangaDexChapters: Starting download loop for mangaId: ${mangaId}`);
+
+    while (offset < total) {
+      const feedUrl = `https://api.mangadex.org/manga/${mangaId}/feed?limit=500&offset=${offset}&translatedLanguage[]=pt-br&translatedLanguage[]=en&order[chapter]=asc`;
+      const response = await fetch(feedUrl, { headers: DEFAULT_HEADERS });
+      if (!response.ok) {
+        throw new Error(`Feed fetch failed (status ${response.status})`);
+      }
+      const json = await response.json();
+      total = json.total || 0;
+      const items = json.data || [];
+      if (items.length === 0) break;
+
+      items.forEach((item: any) => {
+        const chId = item.id;
+        const chNum = item.attributes.chapter;
+        if (!chNum) return; // skip items without a chapter number
+
+        const chTitle = item.attributes.title || '';
+        const lang = item.attributes.translatedLanguage === 'pt-br' ? 'PT-BR' : 'EN';
+        
+        // Ex: "Capítulo 10 - Fim do Mundo (PT-BR)"
+        const name = `Capítulo ${chNum}${chTitle ? ' - ' + chTitle : ''} (${lang})`;
+        const key = `${chNum}-${lang}`; // unique key to prevent duplicate releases for same chapter number and lang
+
+        if (!seenChapters.has(key)) {
+          seenChapters.add(key);
+          chapters.push(name);
+          chapterUrls[name] = `mangadex://${chId}`;
+        }
+      });
+
+      offset += items.length;
+    }
+
+    // Return chronological order (descending order for details display, or sorted ascending in Context)
+    // We sort chapters descending to follow standard display layout (highest chapter first)
+    const sortedChapters = [...chapters].sort((a, b) => {
+      const numA = parseFloat(a.match(/\d+(?:\.\d+)?/)?.[0] || '0');
+      const numB = parseFloat(b.match(/\d+(?:\.\d+)?/)?.[0] || '0');
+      if (numB !== numA) return numB - numA;
+      // Secondary sort by PT-BR first
+      return a.includes('PT-BR') ? -1 : 1;
+    });
+
+    console.log(`[DEBUG] fetchMangaDexChapters: Successfully parsed ${sortedChapters.length} chapters.`);
+    return { chapters: sortedChapters, chapterUrls };
+  } catch (e: any) {
+    console.warn('[DEBUG] fetchMangaDexChapters error:', e.message);
+    return { chapters: [], chapterUrls: {} };
+  }
+}
+
+
+

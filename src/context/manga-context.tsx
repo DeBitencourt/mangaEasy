@@ -63,7 +63,13 @@ interface MangaContextType {
   scanLibrary: () => Promise<void>;
   deleteManga: (mangaTitle: string, savePath: string) => Promise<void>;
   updateLastReadChapter: (savePath: string, chapterFolder: string) => Promise<void>;
-  startDownload: (chapters: string[], overridenType?: string) => void;
+  startDownload: (chapters: string[], overridenType?: string, customDetails?: {
+    title: string;
+    coverUrl: string;
+    synopsis: string;
+    chapterUrls: Record<string, string>;
+    source: string;
+  }) => void;
   pauseDownload: (id: string) => void;
   resumeDownload: (id: string) => void;
   cancelDownload: (id: string) => void;
@@ -560,24 +566,40 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const startDownload = (chapters: string[], overridenType?: string) => {
-    if (!mangaDetails || chapters.length === 0) return;
+  const startDownload = (
+    chapters: string[],
+    overridenType?: string,
+    customDetails?: {
+      title: string;
+      coverUrl: string;
+      synopsis: string;
+      chapterUrls: Record<string, string>;
+      source: string;
+    }
+  ) => {
+    const details = customDetails || mangaDetails;
+    if (!details || chapters.length === 0) return;
 
     const id = `dl-${Date.now()}`;
-    const sortedChapters = [...chapters].reverse(); // download in ascending order (older first)
+    // Sort chapters in ascending chronological order based on the chapter number
+    const getChapterNum = (title: string): number => {
+      const match = title.match(/(\d+(?:\.\d+)?)/);
+      return match ? parseFloat(match[1]) : 0;
+    };
+    const sortedChapters = [...chapters].sort((a, b) => getChapterNum(a) - getChapterNum(b));
     
-    let finalMangaType = overridenType || mangaDetails.mangaType || 'Manga';
+    let finalMangaType = overridenType || (details as any).mangaType || 'Novel';
     if (
-      mangaDetails.source?.toLowerCase().includes('asura') ||
-      mangaDetails.url?.toLowerCase().includes('asura')
+      details.source?.toLowerCase().includes('asura') ||
+      (details as any).url?.toLowerCase().includes('asura')
     ) {
       finalMangaType = 'Manhwa';
     }
 
     const newDownload: ActiveDownload = {
       id,
-      mangaTitle: mangaDetails.title,
-      coverUrl: mangaDetails.coverUrl,
+      mangaTitle: details.title,
+      coverUrl: details.coverUrl,
       chaptersCount: sortedChapters.length,
       selectedChapters: sortedChapters,
       currentChapterIndex: 0,
@@ -589,10 +611,10 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       status: 'downloading',
       speed: '0.0 MB/s',
       eta: '--:--',
-      logs: [`[INFO] Iniciando download do mangá: ${mangaDetails.title}`, `[INFO] ${sortedChapters.length} capítulos selecionados para download.`],
-      chapterUrls: mangaDetails.chapterUrls,
+      logs: [`[INFO] Iniciando download: ${details.title} (${details.source})`, `[INFO] ${sortedChapters.length} capítulos selecionados para download.`],
+      chapterUrls: details.chapterUrls,
       mangaType: finalMangaType,
-      synopsis: mangaDetails.synopsis || '',
+      synopsis: details.synopsis || '',
     };
 
     setActiveDownloads((prev) => [newDownload, ...prev]);
@@ -601,11 +623,11 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       runDownloadSim(id, sortedChapters);
     } else {
       runDownloadReal(id, sortedChapters, 0, 0, {
-        title: mangaDetails.title,
-        coverUrl: mangaDetails.coverUrl,
-        synopsis: mangaDetails.synopsis || '',
+        title: details.title,
+        coverUrl: details.coverUrl,
+        synopsis: details.synopsis || '',
         mangaType: finalMangaType,
-        chapterUrls: mangaDetails.chapterUrls,
+        chapterUrls: details.chapterUrls,
       });
     }
   };
