@@ -42,7 +42,9 @@ export const createDetailsStyles = (theme: any) => StyleSheet.create({
     flex: 1,
   },
   modalScrollContent: {
-    padding: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.six + Spacing.three, // Clear Android navigation buttons (64 + 16 = 80px)
     gap: Spacing.three,
   },
   mangaMetaBlock: {

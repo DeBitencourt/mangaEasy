@@ -12,7 +12,7 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { SymbolView } from '@/components/ui/symbol-view';
 import { ThemedText } from '@/components/themed-text';
@@ -121,6 +121,7 @@ export default function OnlineReaderModal({
 }: OnlineReaderModalProps) {
   const theme = useTheme();
   const styles = createReaderStyles(theme);
+  const insets = useSafeAreaInsets();
 
   const [fontSize, setFontSize] = useState(16);
   const [fontFamily, setFontFamily] = useState<'serif' | 'sans-serif'>('serif');
@@ -568,7 +569,7 @@ export default function OnlineReaderModal({
           <Animated.View
             style={{
               position: 'absolute',
-              bottom: 24,
+              bottom: 24 + (insets.bottom || 0),
               left: 20,
               right: 20,
               backgroundColor: 'rgba(0, 0, 0, 0.85)',

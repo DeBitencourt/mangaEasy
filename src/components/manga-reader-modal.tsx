@@ -785,7 +785,7 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
           <Animated.View
             style={{
               position: 'absolute',
-              bottom: 24,
+              bottom: 24 + (insets.bottom || 0),
               left: 20,
               right: 20,
               backgroundColor: 'rgba(0, 0, 0, 0.85)',
