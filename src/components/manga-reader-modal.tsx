@@ -753,7 +753,6 @@ export default function MangaReaderModal({ isOpen, onClose, manga, initialChapte
               )}
               ListEmptyComponent={
                 <View style={styles.readerEmpty}>
-                  <SymbolView name="doc.text.fill" size={32} tintColor="#666" />
                   <ThemedText type="smallBold" style={{ marginTop: Spacing.two, color: '#888' }}>
                     Nenhuma página encontrada
                   </ThemedText>

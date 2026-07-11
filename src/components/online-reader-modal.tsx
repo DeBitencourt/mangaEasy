@@ -354,7 +354,6 @@ export default function OnlineReaderModal({
                   backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 8,
                   paddingHorizontal: 6, paddingVertical: 2, marginRight: 4,
                 }}>
-                  <SymbolView name="wifi" size={10} tintColor="#4fc3f7" />
                   <ThemedText type="code" style={{ fontSize: 9, color: '#4fc3f7' }}>Online</ThemedText>
                 </View>
 
@@ -433,7 +432,6 @@ export default function OnlineReaderModal({
             </View>
           ) : loadError ? (
             <View style={styles.readerLoading}>
-              <SymbolView name="wifi.slash" size={36} tintColor="#f44336" />
               <ThemedText type="smallBold" style={{ marginTop: Spacing.two, color: '#f44336', textAlign: 'center' }}>
                 Erro ao carregar capitulo
               </ThemedText>

@@ -202,7 +202,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                     }
                   ]}
                 >
-                  <SymbolView name="trash" size={16} tintColor="#f44336" />
+                  <SymbolView name="xmark" size={16} tintColor="#f44336" />
                 </Pressable>
               ) : (
                 <View style={{ width: 32 }} />
@@ -244,16 +244,14 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                   </View>
 
                   <View style={styles.detailSourceRow}>
-                    <SymbolView name="folder.fill" size={12} tintColor="#FFA000" />
-                    <ThemedText type="code" themeColor="textSecondary" style={{ marginLeft: 4, fontSize: 10 }}>
+                    <ThemedText type="code" themeColor="textSecondary" style={{ fontSize: 10 }}>
                       {manga.savePath}
                     </ThemedText>
                   </View>
 
                   {lastReadChapter && (
                     <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                      <SymbolView name="clock.fill" size={10} tintColor={theme.accent} />
-                      <ThemedText type="smallBold" style={{ marginLeft: 4, color: theme.accent, fontSize: 10 }}>
+                      <ThemedText type="smallBold" style={{ color: theme.accent, fontSize: 10 }}>
                         Último lido: {formatChapterNameForDisplay(lastReadChapter)}
                       </ThemedText>
                     </View>
@@ -305,7 +303,6 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
               {/* Search and Sort row */}
               <View style={styles.searchSortRow}>
                 <View style={[styles.modalSearchWrapper, { backgroundColor: theme.backgroundElement }]}>
-                  <SymbolView name="magnifyingglass" size={12} tintColor={theme.textSecondary} />
                   <TextInput
                     value={searchChapter}
                     onChangeText={setSearchChapter}
@@ -392,7 +389,7 @@ export default function LocalMangaDetailsModal({ isOpen, onClose, manga, onOpenR
                         }
                       ]}>
                       <SymbolView
-                        name="trash"
+                        name="xmark"
                         size={12}
                         tintColor="#f44336"
                       />

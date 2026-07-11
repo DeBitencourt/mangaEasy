@@ -482,15 +482,13 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                       {mangaDetails.title}
                     </ThemedText>
                     <View style={styles.detailSourceRow}>
-                      <SymbolView name="globe" size={12} tintColor={theme.textSecondary} />
-                      <ThemedText type="small" themeColor="textSecondary" style={{ marginLeft: 4 }}>
+                      <ThemedText type="small" themeColor="textSecondary">
                         {mangaDetails.source}
                       </ThemedText>
                     </View>
 
                     {lastReadChapter && (
                       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
-                        <SymbolView name="clock.fill" size={10} tintColor={theme.accent} />
                         <ThemedText type="smallBold" style={{ marginLeft: 4, color: theme.accent, fontSize: 10 }}>
                           Último lido: {lastReadChapter}
                         </ThemedText>
@@ -515,16 +513,10 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                           }
                         ]}
                       >
-                        <SymbolView
-                          name={isToRead ? 'checkmark.circle.fill' : 'plus.circle'}
-                          size={12}
-                          tintColor={isToRead ? '#4CAF50' : theme.textSecondary}
-                        />
                         <ThemedText
                           type="code"
                           style={{
                             fontSize: 10,
-                            marginLeft: 4,
                             color: isToRead ? '#4CAF50' : theme.textSecondary,
                             fontWeight: 'bold',
                           }}
@@ -806,7 +798,6 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                 {/* Search and Sort row */}
                 <View style={styles.searchSortRow}>
                   <View style={[styles.modalSearchWrapper, { backgroundColor: theme.backgroundElement }]}>
-                    <SymbolView name="magnifyingglass" size={12} tintColor={theme.textSecondary} />
                     <TextInput
                       value={searchChapter}
                       onChangeText={setSearchChapter}
@@ -939,7 +930,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                                   backgroundColor: 'rgba(79, 195, 247, 0.12)',
                                 }}
                               >
-                                <SymbolView name="eye.fill" size={13} tintColor="#4fc3f7" />
+                                <SymbolView name="play.fill" size={13} tintColor="#4fc3f7" />
                               </Pressable>
                             )}
 

@@ -50,7 +50,7 @@ async function resolveLocalCover(title: string, remoteCoverUrl: string | null | 
 }
 
 // Placeholder shown while cover images are loading
-const COVER_PLACEHOLDER = require('../../assets/images/icon.png');
+const COVER_PLACEHOLDER = require('../../assets/images/icon-manga-easy.png');
 
 export default function LibraryScreen() {
   const theme = useTheme();
@@ -468,11 +468,6 @@ export default function LibraryScreen() {
                     }
                   ]}
                 >
-                  <SymbolView
-                    name={tab.icon}
-                    size={14}
-                    tintColor={isSelected ? theme.accent : theme.textSecondary}
-                  />
                   <ThemedText
                     type="smallBold"
                     style={{
@@ -490,14 +485,6 @@ export default function LibraryScreen() {
           {/* List Content */}
           <View style={styles.sectionContainer}>
             <View style={styles.sectionHeader}>
-              <SymbolView
-                name={
-                  activeTab === 'downloads' ? 'books.vertical.fill' :
-                  activeTab === 'favorites' ? 'star.fill' : 'bookmark.fill'
-                }
-                size={16}
-                tintColor={theme.accent}
-              />
               <ThemedText type="smallBold" style={styles.sectionTitle}>
                 {
                   activeTab === 'downloads' ? `Mangás Baixados (${localLibrary.length})` :
@@ -519,7 +506,6 @@ export default function LibraryScreen() {
                 {/* Search bar */}
                 {displayItems.length > 0 && (
                   <View style={[styles.searchBarRow, { backgroundColor: theme.backgroundElement }]}>
-                    <SymbolView name="magnifyingglass" size={13} tintColor={theme.textSecondary} />
                     <TextInput
                       value={librarySearch}
                       onChangeText={setLibrarySearch}
@@ -529,11 +515,11 @@ export default function LibraryScreen() {
                         "Buscar na lista A Ler..."
                       }
                       placeholderTextColor={theme.textSecondary}
-                      style={[styles.searchBarInput, { color: theme.text }]}
+                      style={[styles.searchBarInput, { color: theme.text, paddingLeft: 8 }]}
                     />
                     {librarySearch.length > 0 && (
                       <Pressable onPress={() => setLibrarySearch('')}>
-                        <SymbolView name="xmark.circle.fill" size={14} tintColor={theme.textSecondary} />
+                        <SymbolView name="xmark" size={14} tintColor={theme.textSecondary} />
                       </Pressable>
                     )}
                   </View>

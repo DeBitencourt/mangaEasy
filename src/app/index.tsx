@@ -165,7 +165,6 @@ export default function HomeScreen() {
         {/* Top Control Bar with Search and Source Dropdown */}
         <View style={styles.topBar}>
           <View style={[styles.searchBarWrapper, { backgroundColor: theme.backgroundElement }]}>
-            <SymbolView name="magnifyingglass" size={14} tintColor={theme.textSecondary} />
             <TextInput
               value={searchInput}
               onChangeText={setSearchInput}
@@ -298,7 +297,7 @@ export default function HomeScreen() {
                   {activeSource === 'novelbuddy.com' && searchInput.trim().length === 0 && (
                     <View style={{ marginBottom: 16 }}>
                       <View style={[styles.headerContainer, { borderBottomColor: theme.backgroundSelected, marginBottom: 10 }]}>
-                        <View style={[styles.headerMarker, { backgroundColor: '#f59e0b' }]} />
+                        <View style={[styles.headerMarker, { backgroundColor: '#8b5cf6' }]} />
                         <ThemedText type="smallBold" themeColor="text" style={styles.gridHeaderTitle}>
                           🔥 TRENDING NOVELS
                         </ThemedText>
@@ -344,7 +343,7 @@ export default function HomeScreen() {
                                   width: 22,
                                   height: 22,
                                   borderRadius: 4,
-                                  backgroundColor: idx === 0 ? '#f59e0b' : idx === 1 ? '#94a3b8' : idx === 2 ? '#f97316' : 'rgba(0,0,0,0.6)',
+                                  backgroundColor: idx === 0 ? '#8b5cf6' : idx === 1 ? '#a78bfa' : idx === 2 ? '#c4b5fd' : 'rgba(0,0,0,0.6)',
                                   alignItems: 'center',
                                   justifyContent: 'center',
                                 }}>
@@ -488,7 +487,6 @@ export default function HomeScreen() {
               }}
               ListEmptyComponent={
                 <View style={styles.emptyGridState}>
-                  <SymbolView name="questionmark.circle" size={32} tintColor={theme.textSecondary} />
                   <ThemedText type="smallBold" themeColor="textSecondary" style={{ marginTop: Spacing.two }}>
                     Nenhum resultado encontrado
                   </ThemedText>

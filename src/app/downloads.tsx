@@ -101,13 +101,11 @@ export default function DownloadsScreen() {
                       {!isPaused && (
                         <View style={styles.statsRow}>
                           <View style={styles.statItem}>
-                            <SymbolView name="bolt.fill" size={10} tintColor={theme.accent} />
                             <ThemedText type="code" style={styles.statValue}>
                               {dl.speed}
                             </ThemedText>
                           </View>
                           <View style={styles.statItem}>
-                            <SymbolView name="clock.fill" size={10} tintColor="#FFA000" />
                             <ThemedText type="code" style={styles.statValue}>
                               ETA: {dl.eta}
                             </ThemedText>
@@ -130,7 +128,7 @@ export default function DownloadsScreen() {
                       <Pressable
                         onPress={() => cancelDownload(dl.id)}
                         style={[styles.actionBtn, styles.actionBtnCancel]}>
-                        <SymbolView name="xmark.circle.fill" size={16} tintColor="#f44336" />
+                        <SymbolView name="xmark" size={16} tintColor="#f44336" />
                       </Pressable>
                     </View>
                   </View>
@@ -215,7 +213,6 @@ export default function DownloadsScreen() {
           {/* History / Completed Downloads Section */}
           <View style={[styles.sectionContainer, { marginTop: Spacing.four }]}>
             <View style={libStyles.sectionHeader}>
-              <SymbolView name="clock.arrow.2.circlepath" size={16} tintColor={theme.accent} />
               <ThemedText type="smallBold" style={libStyles.sectionTitle}>
                 Histórico de Downloads ({downloadHistory.length})
               </ThemedText>
@@ -224,17 +221,16 @@ export default function DownloadsScreen() {
             {/* Search bar */}
             {downloadHistory.length > 0 && (
               <View style={[libStyles.searchBarRow, { backgroundColor: theme.backgroundElement }]}>
-                <SymbolView name="magnifyingglass" size={13} tintColor={theme.textSecondary} />
                 <TextInput
                   value={historySearch}
                   onChangeText={setHistorySearch}
                   placeholder="Buscar no histórico..."
                   placeholderTextColor={theme.textSecondary}
-                  style={[libStyles.searchBarInput, { color: theme.text }]}
+                  style={[libStyles.searchBarInput, { color: theme.text, paddingLeft: 8 }]}
                 />
                 {historySearch.length > 0 && (
                   <Pressable onPress={() => setHistorySearch('')}>
-                    <SymbolView name="xmark.circle.fill" size={14} tintColor={theme.textSecondary} />
+                    <SymbolView name="xmark" size={14} tintColor={theme.textSecondary} />
                   </Pressable>
                 )}
               </View>
@@ -262,7 +258,6 @@ export default function DownloadsScreen() {
                       </ThemedText>
                       
                       <View style={libStyles.historyMetaRow}>
-                        <SymbolView name="folder.fill" size={10} tintColor="#FFA000" />
                         <ThemedText type="code" themeColor="textSecondary" style={libStyles.historyPath} numberOfLines={1}>
                           {item.savePath}
                         </ThemedText>
@@ -292,7 +287,6 @@ export default function DownloadsScreen() {
 
             {downloadHistory.length === 0 && (
               <ThemedView type="backgroundElement" style={libStyles.emptyState}>
-                <SymbolView name="clock" size={24} tintColor={theme.textSecondary} />
                 <ThemedText type="smallBold" themeColor="textSecondary" style={{ marginTop: Spacing.two }}>
                   Nenhum histórico disponível.
                 </ThemedText>
@@ -307,7 +301,6 @@ export default function DownloadsScreen() {
                   libStyles.clearBtn,
                   { borderColor: theme.backgroundSelected, opacity: pressed ? 0.7 : 1 },
                 ]}>
-                <SymbolView name="trash" size={14} tintColor="#f44336" />
                 <ThemedText type="smallBold" style={libStyles.clearBtnText}>
                   Limpar Histórico
                 </ThemedText>
