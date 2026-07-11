@@ -6,7 +6,13 @@ const supabaseUrl = (process.env.EXPO_PUBLIC_SUPABASE_URL || '').trim();
 const supabaseAnonKey = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '').trim();
 
 export const supabase = (supabaseUrl && supabaseAnonKey)
-  ? createClient(supabaseUrl, supabaseAnonKey)
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    })
   : null;
 
 export interface SyncStats {
@@ -324,7 +330,7 @@ export async function downloadCloudBackup(backupDeviceId: string): Promise<boole
       // Import progress
       for (const item of (progressRes.data || [])) {
         await db.runAsync(
-          'INSERT INTO reading_progress (id, device_id, title, chapter_title, last_page_read, total_pages, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1)',
+          'INSERT INTO reading_progress (id, device_id, title, chapter_title, last_page_read, total_pages, updated_at, is_deleted, synced) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1)',
           [item.id, item.device_id, item.title, item.chapter_title, item.last_page_read, item.total_pages, item.updated_at]
         );
       }

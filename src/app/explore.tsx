@@ -718,14 +718,6 @@ export default function LibraryScreen() {
                 {/* Empty Tab States */}
                 {displayItems.length === 0 && (
                   <ThemedView type="backgroundElement" style={styles.emptyState}>
-                    <SymbolView
-                      name={
-                        activeTab === 'downloads' ? 'square.and.arrow.down' :
-                        activeTab === 'favorites' ? 'star' : 'bookmark'
-                      }
-                      size={32}
-                      tintColor={theme.textSecondary}
-                    />
                     <ThemedText type="smallBold" themeColor="textSecondary" style={{ marginTop: Spacing.two, textAlign: 'center' }}>
                       {
                         activeTab === 'downloads' ? 'Nenhum mangá baixado no dispositivo.' :
