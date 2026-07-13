@@ -843,12 +843,18 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
           const fileInfo = await FileSystem.getInfoAsync(coverFileUri);
           if (!fileInfo.exists) {
             addLog(`[INFO] Baixando imagem de capa do mangá...`);
-            await FileSystem.downloadAsync(metaCoverUrl, coverFileUri);
+            const coverRes = await FileSystem.downloadAsync(metaCoverUrl, coverFileUri);
+            if (coverRes.status < 200 || coverRes.status >= 300) {
+              throw new Error(`Erro HTTP ${coverRes.status}`);
+            }
             addLog(`[SUCESSO] Capa do mangá salva localmente.`);
           }
           localCoverUri = coverFileUri;
         } catch (err: any) {
           addLog(`[AVISO] Não foi possível salvar a capa localmente: ${err.message}`);
+          try {
+            await FileSystem.deleteAsync(coverFileUri, { idempotent: true });
+          } catch (e) {}
         }
       }
 
@@ -953,7 +959,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
           queue.push(i);
         }
 
-        const CONCURRENCY = 5;
+        const isAsura = chapterUrl.includes('asura');
+        const CONCURRENCY = isAsura ? 2 : 5;
 
         const worker = async () => {
           while (queue.length > 0 && !hasFailed) {
@@ -973,54 +980,93 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
             const fileName = `${pIdx + 1}.${ext}`;
             const fileUri = `${targetDir}/${fileName}`;
 
+            // Optional delay for rate-limited hosts like Asura Scans
+            if (isAsura && pIdx > startPage) {
+              // Wait between 300ms and 700ms randomly to mimic human usage
+              const delay = Math.floor(Math.random() * 400) + 300;
+              await new Promise((resolve) => setTimeout(resolve, delay));
+            }
+
             const startTime = Date.now();
-            try {
-              addLog(`[DOWNLOAD] Baixando ${chapterTitle}: página ${pIdx + 1} de ${imageUrls.length}`);
-              
-              const resolvedReferer = chapterUrl.startsWith('mangadex://') ? 'https://mangadex.org/' : chapterUrl;
-              
-              await FileSystem.downloadAsync(imgUrl, fileUri, {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-                  'Referer': resolvedReferer,
-                },
-              });
+            let success = false;
+            let retries = 3;
+            let lastError: any = null;
 
-              completedPages++;
-
-              const endTime = Date.now();
-              const durationSec = (endTime - startTime) / 1000;
-              const speedMB = (0.25 / Math.max(0.1, durationSec)).toFixed(1);
-
-              const overallPct = Math.round(((cIdx + completedPages / imageUrls.length) / chapters.length) * 100);
-              const pagePct = Math.round((completedPages / imageUrls.length) * 100);
-
-              const remainingChapters = chapters.length - cIdx - 1;
-              const remainingPages = (remainingChapters * 20) + (imageUrls.length - completedPages);
-              const secondsRemaining = Math.max(1, Math.round(remainingPages * Math.max(0.2, durationSec) / CONCURRENCY));
-              const formattedEta = secondsRemaining >= 60 
-                ? `${Math.floor(secondsRemaining / 60)}m ${secondsRemaining % 60}s`
-                : `${secondsRemaining}s`;
-
-              updateProgress({
-                currentChapterIndex: cIdx,
-                currentChapterTitle: chapterTitle,
-                chapterProgress: pagePct,
-                currentPage: completedPages,
-                totalPages: imageUrls.length,
-                totalProgress: Math.min(overallPct, 100),
-                speed: `${speedMB} MB/s`,
-                eta: formattedEta,
-              });
-            } catch (err: any) {
+            while (retries > 0 && !success && !hasFailed) {
               if (downloadStateRef.current[id] === 'paused' || downloadStateRef.current[id] === 'cancelled') {
                 return;
               }
-              addLog(`[ERRO] Falha ao baixar página ${pIdx + 1}: ${err.message || err}`);
+
+              try {
+                addLog(`[DOWNLOAD] Baixando ${chapterTitle}: página ${pIdx + 1} de ${imageUrls.length}${retries < 3 ? ` (Tentativa ${4 - retries})` : ''}`);
+                
+                const resolvedReferer = chapterUrl.startsWith('mangadex://') ? 'https://mangadex.org/' : chapterUrl;
+                
+                const downloadResult = await FileSystem.downloadAsync(imgUrl, fileUri, {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                    'Referer': resolvedReferer,
+                  },
+                });
+
+                if (downloadResult.status < 200 || downloadResult.status >= 300) {
+                  throw new Error(`Erro HTTP ${downloadResult.status}`);
+                }
+
+                success = true;
+              } catch (err: any) {
+                lastError = err;
+                retries--;
+                
+                // Delete file to avoid corrupted files on disk
+                try {
+                  await FileSystem.deleteAsync(fileUri, { idempotent: true });
+                } catch (e) {}
+
+                if (retries > 0 && !hasFailed && downloadStateRef.current[id] === 'downloading') {
+                  const backoffDelay = (4 - retries) * 1000;
+                  addLog(`[AVISO] Falha ao baixar página ${pIdx + 1}: ${err.message || err}. Tentando novamente em ${backoffDelay / 1000}s...`);
+                  await new Promise((resolve) => setTimeout(resolve, backoffDelay));
+                }
+              }
+            }
+
+            if (!success) {
+              if (downloadStateRef.current[id] === 'paused' || downloadStateRef.current[id] === 'cancelled') {
+                return;
+              }
+              addLog(`[ERRO] Falha definitiva ao baixar página ${pIdx + 1}: ${lastError?.message || lastError}`);
               hasFailed = true;
               updateProgress({ status: 'failed' });
               return;
             }
+
+            completedPages++;
+
+            const endTime = Date.now();
+            const durationSec = (endTime - startTime) / 1000;
+            const speedMB = (0.25 / Math.max(0.1, durationSec)).toFixed(1);
+
+            const overallPct = Math.round(((cIdx + completedPages / imageUrls.length) / chapters.length) * 100);
+            const pagePct = Math.round((completedPages / imageUrls.length) * 100);
+
+            const remainingChapters = chapters.length - cIdx - 1;
+            const remainingPages = (remainingChapters * 20) + (imageUrls.length - completedPages);
+            const secondsRemaining = Math.max(1, Math.round(remainingPages * Math.max(0.2, durationSec) / CONCURRENCY));
+            const formattedEta = secondsRemaining >= 60 
+              ? `${Math.floor(secondsRemaining / 60)}m ${secondsRemaining % 60}s`
+              : `${secondsRemaining}s`;
+
+            updateProgress({
+              currentChapterIndex: cIdx,
+              currentChapterTitle: chapterTitle,
+              chapterProgress: pagePct,
+              currentPage: completedPages,
+              totalPages: imageUrls.length,
+              totalProgress: Math.min(overallPct, 100),
+              speed: `${speedMB} MB/s`,
+              eta: formattedEta,
+            });
           }
         };
 
