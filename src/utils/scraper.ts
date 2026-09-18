@@ -28,7 +28,7 @@ export function normalizeMangaUrl(url: string): string {
   if (targetUrl.includes('mangaread.org') && !targetUrl.includes('www.mangaread.org')) {
     targetUrl = targetUrl.replace('mangaread.org', 'www.mangaread.org');
   }
-  if ((targetUrl.includes('/manga/') || targetUrl.includes('/chapter/')) && !targetUrl.endsWith('/')) {
+  if ((targetUrl.includes('/manga/') || targetUrl.includes('/chapter/')) && !targetUrl.includes('?') && !targetUrl.endsWith('/')) {
     targetUrl = targetUrl + '/';
   }
   return targetUrl;
@@ -260,7 +260,6 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
         throw new Error('ID do MangaDex não pôde ser extraído da URL.');
       }
       
-      const allCh = await fetchMangaDexChapters(mangaId);
       const queryUrl = `https://api.mangadex.org/manga/${mangaId}?includes[]=cover_art`;
       const response = await fetch(queryUrl, { headers: { 'Accept': 'application/json' } });
       if (!response.ok) {
@@ -268,8 +267,10 @@ export async function fetchMangaDetailsReal(url: string, source: string): Promis
       }
       const json = await response.json();
       const manga = json.data;
-      const title = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
-      const synopsis = manga.attributes.description.en || Object.values(manga.attributes.description)[0] || '';
+      const title = manga.attributes.title.en || manga.attributes.title['ja-ro'] || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
+      const synopsis = manga.attributes.description['pt-br'] || manga.attributes.description.pt || manga.attributes.description.en || Object.values(manga.attributes.description)[0] || '';
+      
+      const allCh = await fetchMangaDexChapters(mangaId, title);
       
       const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
       const fileName = coverArtRel?.attributes?.fileName;
@@ -872,6 +873,43 @@ export interface SearchResult {
   }>;
   alternativeUrl?: string;
   source?: string;
+  tags?: string[];
+  contentRating?: string;
+}
+
+export function formatRelativeTime(dateString?: string): string {
+  if (!dateString) return '';
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    if (diffMs < 0) return 'Recentemente';
+    const diffSec = Math.floor(diffMs / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHours = Math.floor(diffMin / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMin < 1) return 'Agora mesmo';
+    if (diffMin < 60) return `Há ${diffMin} min`;
+    if (diffHours < 24) return `Há ${diffHours} h`;
+    if (diffDays === 1) return 'Ontem';
+    if (diffDays < 7) return `Há ${diffDays} dias`;
+    return date.toLocaleDateString('pt-BR');
+  } catch {
+    return '';
+  }
+}
+
+export interface PopularMangaItem {
+  id: string;
+  title: string;
+  url: string;
+  coverUrl: string;
+  author?: string;
+  originalLanguage?: string;
+  contentRating?: string;
+  tags?: string[];
+  synopsis?: string;
 }
 
 /**
@@ -985,12 +1023,12 @@ async function searchMangaAsura(query: string): Promise<SearchResult[]> {
  */
 async function searchMangaDexGlobal(query: string): Promise<SearchResult[]> {
   try {
-    const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=20&includes[]=cover_art`;
+    const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(query)}&limit=25&includes[]=cover_art&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&hasAvailableChapters=true`;
     console.log('[DEBUG] searchMangaDexGlobal: Fetching URL:', queryUrl);
     const response = await fetch(queryUrl, {
       headers: {
         'Accept': 'application/json',
-      }
+      },
     });
     console.log('[DEBUG] searchMangaDexGlobal: Status code:', response.status);
     if (!response.ok) {
@@ -1005,20 +1043,33 @@ async function searchMangaDexGlobal(query: string): Promise<SearchResult[]> {
 
     dataList.forEach((manga: any) => {
       const mangaId = manga.id;
-      const title = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
-      
+      const title =
+        manga.attributes?.title?.en ||
+        manga.attributes?.title?.['ja-ro'] ||
+        Object.values(manga.attributes?.title || {})[0] ||
+        'MangaDex Title';
+
       const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
       const fileName = coverArtRel?.attributes?.fileName;
-      let coverUrl = '';
+      let coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
       if (fileName) {
-        coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+        coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}.512.jpg`;
       }
+
+      const tags = (manga.attributes?.tags || [])
+        .map((t: any) => t.attributes?.name?.en)
+        .filter(Boolean)
+        .slice(0, 3);
+
+      const contentRating = manga.attributes?.contentRating;
 
       results.push({
         title,
         url: `https://mangadex.org/title/${mangaId}`,
         coverUrl,
         source: 'mangadex.org',
+        tags: tags.length > 0 ? tags : undefined,
+        contentRating,
       });
     });
 
@@ -1170,40 +1221,111 @@ export async function searchMangaReal(query: string, source: string): Promise<Se
 export async function fetchLatestUpdatesReal(source: string, page: number = 1): Promise<SearchResult[]> {
   if (source === 'mangadex.org') {
     try {
-      const queryUrl = `https://api.mangadex.org/manga?limit=30&offset=${(page - 1) * 30}&order[latestUploadedChapter]=desc&includes[]=cover_art`;
-      console.log('[DEBUG] fetchLatestUpdatesReal (MangaDex): Fetching URL:', queryUrl);
-      const response = await fetch(queryUrl, {
-        headers: {
-          'Accept': 'application/json',
-        }
+      const limit = 32;
+      const offset = (page - 1) * limit;
+      const chapterUrl = `https://api.mangadex.org/chapter?includes[]=manga&includes[]=scanlation_group&contentRating[]=safe&contentRating[]=suggestive&order[readableAt]=desc&limit=${limit}&offset=${offset}`;
+      console.log('[DEBUG] fetchLatestUpdatesReal (MangaDex): Fetching URL:', chapterUrl);
+      const response = await fetch(chapterUrl, {
+        headers: { 'Accept': 'application/json' },
       });
-      console.log('[DEBUG] fetchLatestUpdatesReal (MangaDex): Status code:', response.status);
+
       if (!response.ok) {
         const errText = await response.text();
         console.warn('[DEBUG] fetchLatestUpdatesReal (MangaDex): Error response body:', errText);
         return [];
       }
-      const json = await response.json();
-      const dataList = json.data || [];
-      console.log(`[DEBUG] fetchLatestUpdatesReal (MangaDex): Returned ${dataList.length} items.`);
-      const results: SearchResult[] = [];
 
-      dataList.forEach((manga: any) => {
-        const mangaId = manga.id;
-        const title = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
-        
-        const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
-        const fileName = coverArtRel?.attributes?.fileName;
-        let coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
-        if (fileName) {
-          coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+      const json = await response.json();
+      const chaptersList = json.data || [];
+
+      // Deduplicate manga while preserving the latest chapter release
+      const mangaMap = new Map<string, {
+        mangaId: string;
+        mangaRel: any;
+        chapterName: string;
+        date: string;
+        lang?: string;
+      }>();
+
+      chaptersList.forEach((ch: any) => {
+        const mangaRel = ch.relationships?.find((r: any) => r.type === 'manga');
+        if (!mangaRel || !mangaRel.id) return;
+        const mangaId = mangaRel.id;
+        if (!mangaMap.has(mangaId)) {
+          const chNum = ch.attributes?.chapter;
+          const chTitle = ch.attributes?.title;
+          const lang = ch.attributes?.translatedLanguage;
+          const langTag = lang ? (lang === 'pt-br' ? 'PT-BR' : lang.toUpperCase()) : '';
+          const chapterName = chNum
+            ? `Capítulo ${chNum}${langTag ? ` (${langTag})` : ''}`
+            : (chTitle ? `${chTitle}${langTag ? ` (${langTag})` : ''}` : 'Novo Capítulo');
+          const date = formatRelativeTime(ch.attributes?.readableAt);
+
+          mangaMap.set(mangaId, {
+            mangaId,
+            mangaRel,
+            chapterName,
+            date,
+            lang,
+          });
         }
+      });
+
+      const mangaIds = Array.from(mangaMap.keys());
+      if (mangaIds.length === 0) return [];
+
+      // Batch query covers for all unique manga in ONE request
+      const idsQuery = mangaIds.map(id => `ids[]=${id}`).join('&');
+      const coversResponse = await fetch(`https://api.mangadex.org/manga?${idsQuery}&includes[]=cover_art&limit=100`, {
+        headers: { 'Accept': 'application/json' },
+      });
+
+      const coverMap = new Map<string, string>();
+      if (coversResponse.ok) {
+        const coversJson = await coversResponse.json();
+        (coversJson.data || []).forEach((m: any) => {
+          const coverArtRel = m.relationships?.find((r: any) => r.type === 'cover_art');
+          const fileName = coverArtRel?.attributes?.fileName;
+          if (fileName) {
+            coverMap.set(m.id, fileName);
+          }
+        });
+      }
+
+      const results: SearchResult[] = [];
+      mangaMap.forEach((entry) => {
+        const m = entry.mangaRel;
+        const title =
+          m.attributes?.title?.en ||
+          m.attributes?.title?.['ja-ro'] ||
+          Object.values(m.attributes?.title || {})[0] ||
+          'MangaDex Title';
+
+        const fileName = coverMap.get(entry.mangaId);
+        const coverUrl = fileName
+          ? `https://uploads.mangadex.org/covers/${entry.mangaId}/${fileName}.512.jpg`
+          : 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+
+        const tags = (m.attributes?.tags || [])
+          .map((t: any) => t.attributes?.name?.en)
+          .filter(Boolean)
+          .slice(0, 3);
+
+        const contentRating = m.attributes?.contentRating;
 
         results.push({
           title,
-          url: `https://mangadex.org/title/${mangaId}`,
+          url: `https://mangadex.org/title/${entry.mangaId}`,
           coverUrl,
           source: 'mangadex.org',
+          tags: tags.length > 0 ? tags : undefined,
+          contentRating,
+          chapters: [
+            {
+              name: entry.chapterName,
+              date: entry.date,
+            },
+          ],
         });
       });
 
@@ -2013,7 +2135,7 @@ export async function fetchNovelFullAllChapters(novelUrl: string): Promise<{ cha
  */
 export async function searchMangaDex(title: string): Promise<any> {
   try {
-    const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=5&includes[]=cover_art`;
+    const queryUrl = `https://api.mangadex.org/manga?title=${encodeURIComponent(title)}&limit=5&includes[]=cover_art&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive&contentRating[]=erotica&hasAvailableChapters=true`;
     const response = await fetch(queryUrl, { headers: { 'Accept': 'application/json' } });
     if (!response.ok) {
       throw new Error(`MangaDex search failed (status ${response.status})`);
@@ -2024,15 +2146,15 @@ export async function searchMangaDex(title: string): Promise<any> {
 
     const manga = dataList[0];
     const mangaId = manga.id;
-    const mangaTitle = manga.attributes.title.en || Object.values(manga.attributes.title)[0] || 'MangaDex Title';
-    const synopsis = manga.attributes.description.en || Object.values(manga.attributes.description)[0] || '';
+    const mangaTitle = manga.attributes?.title?.en || manga.attributes?.title?.['ja-ro'] || Object.values(manga.attributes?.title || {})[0] || 'MangaDex Title';
+    const synopsis = manga.attributes?.description?.en || Object.values(manga.attributes?.description || {})[0] || '';
 
     // Find cover art file name from expanded relationships
     const coverArtRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
     const fileName = coverArtRel?.attributes?.fileName;
     let coverUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
     if (fileName) {
-      coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}`;
+      coverUrl = `https://uploads.mangadex.org/covers/${mangaId}/${fileName}.512.jpg`;
     }
 
     return {
@@ -2049,10 +2171,87 @@ export async function searchMangaDex(title: string): Promise<any> {
 }
 
 /**
- * Fetches all chapters from MangaDex in Portuguese (pt-br) and English (en)
+ * Fetches all One Piece chapters in Portuguese (PT-BR) from mangaonline.tv
  */
-export async function fetchMangaDexChapters(mangaId: string): Promise<{ chapters: string[], chapterUrls: Record<string, string> }> {
+export async function fetchMangaOnlineOnePieceChapters(): Promise<{ chapters: string[], chapterUrls: Record<string, string> }> {
   try {
+    console.log('[DEBUG] fetchMangaOnlineOnePieceChapters: fetching https://mangaonline.tv/manga/one-piece/');
+    const res = await fetch('https://mangaonline.tv/manga/one-piece/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Falha ao carregar mangaonline.tv (status ${res.status})`);
+    }
+
+    const html = await res.text();
+    const root = parse(html);
+    const links = root.querySelectorAll('a.mo-chapter-card-link');
+    const chapters: string[] = [];
+    const chapterUrls: Record<string, string> = {};
+
+    links.forEach((a) => {
+      const href = a.getAttribute('href');
+      if (!href) return;
+      const match = href.match(/\/capitulo-(\d+(?:[\.-]\d+)?)/i);
+      if (match) {
+        const num = match[1].replace('-', '.');
+        const name = `Capítulo ${num} (PT-BR)`;
+        if (!chapterUrls[name]) {
+          chapters.push(name);
+          chapterUrls[name] = href.endsWith('/') ? `${href}?style=list` : `${href}/?style=list`;
+        }
+      }
+    });
+
+    // Fallback regex in case class name changes
+    if (chapters.length === 0) {
+      const regex = /href="([^"]*\/manga\/one-piece\/capitulo-([0-9\.-]+)\/?[^"]*)"/gi;
+      let m;
+      while ((m = regex.exec(html)) !== null) {
+        const rawHref = m[1];
+        const num = m[2].replace('-', '.');
+        const name = `Capítulo ${num} (PT-BR)`;
+        if (!chapterUrls[name]) {
+          chapters.push(name);
+          const cleanHref = rawHref.split('?')[0];
+          chapterUrls[name] = cleanHref.endsWith('/') ? `${cleanHref}?style=list` : `${cleanHref}/?style=list`;
+        }
+      }
+    }
+
+    // Sort chapters descending (highest chapter first)
+    chapters.sort((a, b) => {
+      const numA = parseFloat(a.match(/\d+(?:\.\d+)?/)?.[0] || '0');
+      const numB = parseFloat(b.match(/\d+(?:\.\d+)?/)?.[0] || '0');
+      return numB - numA;
+    });
+
+    console.log(`[DEBUG] fetchMangaOnlineOnePieceChapters: successfully parsed ${chapters.length} chapters.`);
+    return { chapters, chapterUrls };
+  } catch (err: any) {
+    console.warn('[DEBUG] fetchMangaOnlineOnePieceChapters error:', err.message);
+    return { chapters: [], chapterUrls: {} };
+  }
+}
+
+const ONE_PIECE_MANGADEX_ID = 'a1c7c817-4e59-43b7-9365-09675a149a6f';
+
+/**
+ * Fetches all chapters from MangaDex in Portuguese (pt-br) and English (en)
+ * Intercepts One Piece to serve from mangaonline.tv in Portuguese
+ */
+export async function fetchMangaDexChapters(mangaId: string, mangaTitle?: string): Promise<{ chapters: string[], chapterUrls: Record<string, string> }> {
+  try {
+    const isOnePiece = mangaId === ONE_PIECE_MANGADEX_ID || mangaTitle?.toLowerCase().trim() === 'one piece';
+    if (isOnePiece) {
+      console.log(`[DEBUG] fetchMangaDexChapters: One Piece detectado (${mangaId}). Carregando capítulos de mangaonline.tv em PT-BR...`);
+      return await fetchMangaOnlineOnePieceChapters();
+    }
+
     const chapters: string[] = [];
     const chapterUrls: Record<string, string> = {};
     const seenChapters = new Set<string>();
@@ -2078,6 +2277,12 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<{ chapters
         const chNum = item.attributes.chapter;
         if (!chNum) return; // skip items without a chapter number
 
+        const externalUrl = item.attributes.externalUrl;
+        if (externalUrl && externalUrl.includes('mangaplus')) {
+          // Skip MangaPlus chapters since external website opening is removed
+          return;
+        }
+
         const chTitle = item.attributes.title || '';
         const lang = item.attributes.translatedLanguage === 'pt-br' ? 'PT-BR' : 'EN';
         
@@ -2085,10 +2290,15 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<{ chapters
         const name = `Capítulo ${chNum}${chTitle ? ' - ' + chTitle : ''} (${lang})`;
         const key = `${chNum}-${lang}`; // unique key to prevent duplicate releases for same chapter number and lang
 
+        const targetUrl = externalUrl || `mangadex://${chId}`;
+
         if (!seenChapters.has(key)) {
           seenChapters.add(key);
           chapters.push(name);
-          chapterUrls[name] = `mangadex://${chId}`;
+          chapterUrls[name] = targetUrl;
+        } else if (!externalUrl && chapterUrls[name] && !chapterUrls[name].startsWith('mangadex://')) {
+          // If previous entry was external but an internal chapter exists, prefer internal
+          chapterUrls[name] = targetUrl;
         }
       });
 
@@ -2110,6 +2320,81 @@ export async function fetchMangaDexChapters(mangaId: string): Promise<{ chapters
   } catch (e: any) {
     console.warn('[DEBUG] fetchMangaDexChapters error:', e.message);
     return { chapters: [], chapterUrls: {} };
+  }
+}
+
+/**
+ * Fetches popular new titles from MangaDex from the last 30 days ordered by follower count
+ */
+export async function fetchMangaDexPopularNew(): Promise<PopularMangaItem[]> {
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const createdAtSince = thirtyDaysAgo.toISOString().split('.')[0];
+
+    const queryUrl = `https://api.mangadex.org/manga?includes[]=cover_art&includes[]=artist&includes[]=author&order[followedCount]=desc&contentRating[]=safe&contentRating[]=suggestive&hasAvailableChapters=true&limit=10&createdAtSince=${encodeURIComponent(createdAtSince)}`;
+
+    console.log('[DEBUG] fetchMangaDexPopularNew: Fetching URL:', queryUrl);
+    const response = await fetch(queryUrl, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn('[DEBUG] fetchMangaDexPopularNew error response:', errText);
+      return [];
+    }
+
+    const json = await response.json();
+    const dataList = json.data || [];
+
+    return dataList.map((manga: any) => {
+      const mangaId = manga.id;
+      const title =
+        manga.attributes?.title?.en ||
+        manga.attributes?.title?.['ja-ro'] ||
+        Object.values(manga.attributes?.title || {})[0] ||
+        'MangaDex Title';
+
+      const coverRel = manga.relationships?.find((r: any) => r.type === 'cover_art');
+      const fileName = coverRel?.attributes?.fileName;
+      const coverUrl = fileName
+        ? `https://uploads.mangadex.org/covers/${mangaId}/${fileName}.512.jpg`
+        : 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?w=400&q=80';
+
+      const authorRel =
+        manga.relationships?.find((r: any) => r.type === 'author') ||
+        manga.relationships?.find((r: any) => r.type === 'artist');
+      const author = authorRel?.attributes?.name;
+
+      const tags = (manga.attributes?.tags || [])
+        .map((t: any) => t.attributes?.name?.en)
+        .filter(Boolean)
+        .slice(0, 4);
+
+      const contentRating = manga.attributes?.contentRating;
+      const originalLanguage = manga.attributes?.originalLanguage;
+      const synopsis =
+        manga.attributes?.description?.en ||
+        Object.values(manga.attributes?.description || {})[0] ||
+        '';
+
+      return {
+        id: mangaId,
+        title,
+        url: `https://mangadex.org/title/${mangaId}`,
+        coverUrl,
+        author,
+        originalLanguage,
+        contentRating,
+        tags,
+        synopsis,
+      } as PopularMangaItem;
+    });
+  } catch (e: any) {
+    console.error('[DEBUG] fetchMangaDexPopularNew error:', e.message);
+    return [];
   }
 }
 

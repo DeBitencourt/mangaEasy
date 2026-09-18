@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { Platform, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { fetchMangaDetailsReal, fetchChapterImagesReal, fetchNovelTextReal, normalizeMangaUrl, SearchResult } from '@/utils/scraper';
+import { fetchMangaDetailsReal, fetchChapterImagesReal, fetchNovelTextReal, normalizeMangaUrl, SearchResult, PopularMangaItem } from '@/utils/scraper';
 
 export interface ActiveDownload {
   id: string;
@@ -86,6 +86,9 @@ interface MangaContextType {
   fetchMoreLatestUpdates: () => Promise<void>;
   trendingNovels: SearchResult[];
   loadingTrending: boolean;
+  popularMangaDex: PopularMangaItem[];
+  loadingPopularMangaDex: boolean;
+  fetchPopularMangaDex: () => Promise<void>;
 }
 
 const MangaContext = createContext<MangaContextType | undefined>(undefined);
@@ -180,6 +183,8 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
   const [currentLatestPage, setCurrentLatestPage] = useState(1);
   const [trendingNovels, setTrendingNovels] = useState<SearchResult[]>([]);
   const [loadingTrending, setLoadingTrending] = useState(false);
+  const [popularMangaDex, setPopularMangaDex] = useState<PopularMangaItem[]>([]);
+  const [loadingPopularMangaDex, setLoadingPopularMangaDex] = useState(false);
 
   const downloadIntervals = useRef<Record<string, NodeJS.Timeout>>({});
   const downloadStateRef = useRef<Record<string, 'downloading' | 'paused' | 'cancelled' | 'completed'>>({});
@@ -487,6 +492,11 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
       fetchTrendingNovels();
     } else {
       setTrendingNovels([]);
+    }
+    if (activeSource === 'mangadex.org') {
+      fetchPopularMangaDex();
+    } else {
+      setPopularMangaDex([]);
     }
   }, [activeSource]);
 
@@ -1525,6 +1535,19 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const fetchPopularMangaDex = async () => {
+    setLoadingPopularMangaDex(true);
+    try {
+      const { fetchMangaDexPopularNew } = require('@/utils/scraper');
+      const results = await fetchMangaDexPopularNew();
+      setPopularMangaDex(results);
+    } catch (e: any) {
+      console.warn('[DEBUG] fetchPopularMangaDex error:', e.message);
+    } finally {
+      setLoadingPopularMangaDex(false);
+    }
+  };
+
   // Clean intervals on unmount
   useEffect(() => {
     return () => {
@@ -1567,6 +1590,9 @@ export function MangaProvider({ children }: { children: React.ReactNode }) {
         fetchMoreLatestUpdates,
         trendingNovels,
         loadingTrending,
+        popularMangaDex,
+        loadingPopularMangaDex,
+        fetchPopularMangaDex,
       }}>
       {children}
     </MangaContext.Provider>

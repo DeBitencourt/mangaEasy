@@ -22,6 +22,7 @@ import { toggleFavoriteLocal, getActiveFavoritesLocal } from '@/utils/database';
 // Import separated components and styles
 import MangaDetailsModal from '@/components/manga-details-modal';
 import MangaReaderModal from '@/components/manga-reader-modal';
+import { PopularCarousel } from '@/components/popular-carousel';
 import { createSharedStyles } from '@/styles/shared.styles';
 import { createHomeStyles } from '@/styles/home.styles';
 
@@ -50,6 +51,8 @@ export default function HomeScreen() {
     scanLibrary,
     trendingNovels,
     loadingTrending,
+    popularMangaDex,
+    loadingPopularMangaDex,
   } = useManga();
 
   const [searchInput, setSearchInput] = useState('');
@@ -293,6 +296,15 @@ export default function HomeScreen() {
               }
               ListHeaderComponent={
                 <View>
+                  {/* MangaDex Popular New Titles Carousel */}
+                  {activeSource === 'mangadex.org' && searchInput.trim().length === 0 && (
+                    <PopularCarousel
+                      items={popularMangaDex}
+                      loading={loadingPopularMangaDex}
+                      onSelectManga={handleSelectManga}
+                    />
+                  )}
+
                   {/* Trending Novels – only shown for NovelBuddy when not searching */}
                   {activeSource === 'novelbuddy.com' && searchInput.trim().length === 0 && (
                     <View style={{ marginBottom: 16 }}>
@@ -406,6 +418,8 @@ export default function HomeScreen() {
                         source={{ uri: item.coverUrl }}
                         style={styles.mangaCardImage}
                         contentFit="cover"
+                        cachePolicy="memory-disk"
+                        transition={120}
                       />
                       {/* Star overlay button */}
                       <Pressable
@@ -431,42 +445,62 @@ export default function HomeScreen() {
                       </Pressable>
                     </View>
                     <View style={styles.mangaCardInfo}>
-                      <ThemedText type="defaultSemiBold" numberOfLines={2} style={styles.mangaCardTitle}>
+                      <ThemedText type="smallBold" numberOfLines={2} style={styles.mangaCardTitle}>
                         {item.title}
                       </ThemedText>
 
-                      {/* Rating Row */}
-                      <View style={styles.ratingRow}>
-                        {Array.from({ length: 5 }).map((_, index) => {
-                          const isFilled = index < filledStars;
-                          return (
-                            <SymbolView
-                              key={index}
-                              name={isFilled ? 'star.fill' : 'star'}
-                              size={14}
-                              tintColor={isFilled ? '#FFC107' : theme.textSecondary}
-                              style={styles.starIcon}
-                            />
-                          );
-                        })}
-                        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.ratingText}>
-                          {ratingVal.toFixed(1)}
-                        </ThemedText>
-                      </View>
+                      {/* Tags Row (if tags exist) */}
+                      {item.tags && item.tags.length > 0 ? (
+                        <View style={styles.cardTagsRow}>
+                          {item.tags.slice(0, 3).map((tag: string, tIdx: number) => (
+                            <View
+                              key={tIdx}
+                              style={[styles.cardTagBadge, { backgroundColor: theme.backgroundSelected }]}
+                            >
+                              <ThemedText
+                                style={[styles.cardTagText, { color: theme.textSecondary }]}
+                              >
+                                {tag.toUpperCase()}
+                              </ThemedText>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        /* Rating Row (fallback for sources without tags) */
+                        <View style={styles.ratingRow}>
+                          {Array.from({ length: 5 }).map((_, index) => {
+                            const isFilled = index < filledStars;
+                            return (
+                              <SymbolView
+                                key={index}
+                                name={isFilled ? 'star.fill' : 'star'}
+                                size={14}
+                                tintColor={isFilled ? '#FFC107' : theme.textSecondary}
+                                style={styles.starIcon}
+                              />
+                            );
+                          })}
+                          <ThemedText type="smallBold" themeColor="textSecondary" style={styles.ratingText}>
+                            {ratingVal.toFixed(1)}
+                          </ThemedText>
+                        </View>
+                      )}
 
                       {/* Chapters Row */}
                       {item.chapters && item.chapters.length > 0 ? (
                         <View style={styles.chaptersList}>
-                          {item.chapters.slice(0, 2).map((chap, idx) => (
+                          {item.chapters.slice(0, 2).map((chap: any, idx: number) => (
                             <View key={idx} style={styles.chapterRow}>
                               <View style={[styles.chapterPill, { backgroundColor: theme.backgroundSelected }]}>
                                 <ThemedText type="smallBold" themeColor="text" style={styles.chapterPillText}>
                                   {chap.name}
                                 </ThemedText>
                               </View>
-                              <ThemedText type="small" themeColor="textSecondary" style={styles.chapterDate}>
-                                {chap.date}
-                              </ThemedText>
+                              {chap.date ? (
+                                <ThemedText type="small" themeColor="textSecondary" style={styles.chapterDate}>
+                                  {chap.date}
+                                </ThemedText>
+                              ) : null}
                             </View>
                           ))}
                         </View>

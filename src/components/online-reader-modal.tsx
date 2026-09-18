@@ -70,11 +70,20 @@ const OnlineReaderPage = React.memo(({
     : styles.readerPageImage;
 
   const isMangaDexImage = uri.includes('mangadex.org');
+  const isMangaOnlineImage = uri.includes('mangaonline.tv');
   const sourceProp = isMangaDexImage
     ? {
         uri,
         headers: {
           'Referer': 'https://mangadex.org/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+        }
+      }
+    : isMangaOnlineImage
+    ? {
+        uri,
+        headers: {
+          'Referer': 'https://mangaonline.tv/',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
         }
       }

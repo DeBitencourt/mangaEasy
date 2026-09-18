@@ -20,7 +20,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 // Import separated styles
 import { createSharedStyles } from '@/styles/shared.styles';
-import { createDetailsStyles } from '@/styles/details.styles';;
+import { createDetailsStyles } from '@/styles/details.styles';
 import * as FileSystem from 'expo-file-system/legacy';
 import { toggleToReadLocal, isToReadLocal, toggleFavoriteLocal, isFavoriteLocal, getMangaLastReadChapterLocal } from '@/utils/database';
 import OnlineReaderModal from '@/components/online-reader-modal';
@@ -62,7 +62,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [loadingMangaDex, setLoadingMangaDex] = useState(false);
   const [mangaDexDetails, setMangaDexDetails] = useState<any>(null);
   const [mangaDexPage, setMangaDexPage] = useState(1);
-  const [langFilter, setLangFilter] = useState<'ALL' | 'PT-BR' | 'EN'>('ALL');
+  const [langFilter, setLangFilter] = useState<'ALL' | 'PT-BR' | 'EN'>('PT-BR');
 
   // Range selector state
   const [isRangeActive, setIsRangeActive] = useState(false);
@@ -71,6 +71,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
   const [isToRead, setIsToRead] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [lastReadChapter, setLastReadChapter] = useState<string | null>(null);
+  const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
 
   // Online reader state
   const [onlineReaderChapter, setOnlineReaderChapter] = useState<string | null>(null);
@@ -90,6 +91,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setRangeStart('');
       setRangeEnd('');
       setIsSourceDropdownOpen(false);
+      setIsSynopsisExpanded(false);
       
       const originSource = (mangaDetails as any)?.source;
       if (originSource === 'mangadex.org' || originSource === 'novelbuddy.com' || originSource === 'novelfull.com') {
@@ -104,7 +106,7 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       setMangaDexDetails(null);
       setMangaDexPage(1);
       setLoadingMangaDex(false);
-      setLangFilter('ALL');
+      setLangFilter('PT-BR');
     }
   }, [isOpen, mangaDetails]);
 
@@ -237,8 +239,8 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
         return;
       }
 
-      console.log(`[DEBUG] loadMangaDexDetails: fetching chapters for MangaDex ID: ${meta.id}`);
-      const allCh = await fetchMangaDexChapters(meta.id);
+      console.log(`[DEBUG] loadMangaDexDetails: fetching chapters for MangaDex ID: ${meta.id} (${meta.title})`);
+      const allCh = await fetchMangaDexChapters(meta.id, meta.title);
 
       const mergedDetails = {
         ...meta,
@@ -298,6 +300,16 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     return downloadedNums.has(parseFloat(match[1]));
   };
 
+  const getChapterUrl = (chapterName: string): string => {
+    if (readingSource === 'novelfull.com') {
+      return novelFullDetails?.chapterUrls?.[chapterName] || '';
+    }
+    if (readingSource === 'mangadex.org') {
+      return mangaDexDetails?.chapterUrls?.[chapterName] || mangaDetails?.chapterUrls?.[chapterName] || '';
+    }
+    return mangaDetails?.chapterUrls?.[chapterName] || '';
+  };
+
   const toggleChapter = (chapter: string) => {
     if (isDownloaded(chapter)) return;
     setSelectedChapters((prev) =>
@@ -310,9 +322,13 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     const baseList = readingSource === 'novelfull.com'
       ? (novelFullDetails?.chapters || [])
       : readingSource === 'mangadex.org'
-        ? (mangaDexDetails?.chapters || [])
+        ? (mangaDexDetails?.chapters || mangaDetails?.chapters || [])
         : mangaDetails.chapters;
-    setSelectedChapters(baseList.filter(ch => !isDownloaded(ch)));
+    const langFiltered = readingSource === 'mangadex.org' && langFilter !== 'ALL'
+      ? baseList.filter((ch: string) => ch.includes(`(${langFilter})`))
+      : baseList;
+    const downloadable = langFiltered.filter((ch: string) => !isDownloaded(ch));
+    setSelectedChapters(downloadable);
   };
 
   const handleSelectNone = () => {
@@ -335,10 +351,13 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
     const baseList = readingSource === 'novelfull.com'
       ? (novelFullDetails?.chapters || [])
       : readingSource === 'mangadex.org'
-        ? (mangaDexDetails?.chapters || [])
+        ? (mangaDexDetails?.chapters || mangaDetails?.chapters || [])
         : mangaDetails.chapters;
+    const langFiltered = readingSource === 'mangadex.org' && langFilter !== 'ALL'
+      ? baseList.filter((ch: string) => ch.includes(`(${langFilter})`))
+      : baseList;
 
-    const matched = baseList.filter((ch) => {
+    const matched = langFiltered.filter((ch: string) => {
       if (isDownloaded(ch)) return false;
       const match = ch.match(/\d+/);
       if (match) {
@@ -405,14 +424,14 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
       ? (mangaDexDetails?.chapters || mangaDetails?.chapters || [])
       : (mangaDetails?.chapters || []);
 
-  const languageFilteredChapters = baseChapters.filter((ch) => {
+  const languageFilteredChapters = baseChapters.filter((ch: string) => {
     if (readingSource === 'mangadex.org' && langFilter !== 'ALL') {
       return ch.includes(`(${langFilter})`);
     }
     return true;
   });
 
-  const filteredChapters = languageFilteredChapters.filter((ch) =>
+  const filteredChapters = languageFilteredChapters.filter((ch: string) =>
     ch.toLowerCase().includes(searchChapter.toLowerCase())
   );
 
@@ -733,19 +752,42 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                 )}
 
                 {/* Synopsis */}
-                <ThemedView type="backgroundElement" style={styles.synopsisCard}>
-                  <ThemedText type="smallBold" style={{ marginBottom: 4 }}>Sinopse</ThemedText>
-                  <ThemedText type="small" themeColor="textSecondary" style={styles.synopsisText}>
-                    {mangaDetails.synopsis}
-                  </ThemedText>
-                </ThemedView>
+                {mangaDetails.synopsis ? (
+                  <ThemedView type="backgroundElement" style={styles.synopsisCard}>
+                    <ThemedText type="smallBold" style={{ marginBottom: 4 }}>Sinopse</ThemedText>
+                    <ThemedText
+                      type="small"
+                      themeColor="textSecondary"
+                      style={styles.synopsisText}
+                      numberOfLines={isSynopsisExpanded ? undefined : 3}
+                    >
+                      {mangaDetails.synopsis}
+                    </ThemedText>
+                    {mangaDetails.synopsis.length > 120 && (
+                      <Pressable
+                        onPress={() => setIsSynopsisExpanded(!isSynopsisExpanded)}
+                        hitSlop={8}
+                        style={styles.synopsisMoreBtn}
+                      >
+                        <ThemedText type="smallBold" style={[styles.synopsisMoreText, { color: theme.accent }]}>
+                          {isSynopsisExpanded ? 'Menos' : 'Mais...'}
+                        </ThemedText>
+                        <SymbolView
+                          name={isSynopsisExpanded ? 'chevron.up' : 'chevron.down'}
+                          size={11}
+                          tintColor={theme.accent}
+                        />
+                      </Pressable>
+                    )}
+                  </ThemedView>
+                ) : null}
 
                 <View style={sharedStyles.divider} />
 
                 {/* Selection Header */}
                 <View style={styles.selectionControls}>
                   <ThemedText type="smallBold">
-                    Capítulos ({selectedChapters.length}/{baseChapters.length})
+                    Capítulos ({selectedChapters.length}/{languageFilteredChapters.length})
                   </ThemedText>
                   <View style={styles.bulkButtons}>
                     <Pressable onPress={handleSelectAll} style={sharedStyles.actionPill}>
@@ -885,20 +927,15 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                       contentContainerStyle={styles.chaptersListContent}
                       nestedScrollEnabled={true}
                       showsVerticalScrollIndicator={true}>
-                      {displayedChapters.map((item, idx) => {
+                      {displayedChapters.map((item: string, idx: number) => {
                         const isChecked = selectedChapters.includes(item);
                         const alreadyDownloaded = isDownloaded(item);
-                        const hasUrl = readingSource === 'novelfull.com'
-                          ? !!novelFullDetails?.chapterUrls?.[item]
-                          : readingSource === 'mangadex.org'
-                            ? !!(mangaDexDetails?.chapterUrls?.[item] || mangaDetails?.chapterUrls?.[item])
-                            : !!mangaDetails?.chapterUrls?.[item];
+                        const chapterUrl = getChapterUrl(item);
+                        const hasUrl = !!chapterUrl;
 
                         return (
-                          <Pressable
+                          <View
                             key={`${item}-${idx}`}
-                            onPress={() => toggleChapter(item)}
-                            disabled={alreadyDownloaded}
                             style={[
                               styles.chapterRow,
                               {
@@ -910,49 +947,61 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
                                   : isChecked ? theme.accent : theme.backgroundSelected,
                               },
                             ]}>
-                            <ThemedText
-                              type="small"
-                              style={{
-                                color: alreadyDownloaded ? '#4CAF50' : isChecked ? theme.text : theme.textSecondary,
-                                flex: 1,
-                              }}>
-                              {item}
-                            </ThemedText>
+                            <Pressable
+                              style={{ flex: 1, paddingVertical: 2 }}
+                              onPress={() => toggleChapter(item)}
+                              disabled={alreadyDownloaded}
+                            >
+                              <ThemedText
+                                type="small"
+                                style={{
+                                  color: alreadyDownloaded ? '#4CAF50' : isChecked ? theme.text : theme.textSecondary,
+                                }}>
+                                {item}
+                              </ThemedText>
+                            </Pressable>
 
                             {/* Ler Online button */}
                             {hasUrl && (
                               <Pressable
-                                onPress={(e) => { e.stopPropagation(); openOnlineReader(item); }}
+                                onPress={() => openOnlineReader(item)}
+                                hitSlop={8}
                                 style={{
-                                  marginRight: 6,
-                                  padding: 4,
+                                  marginRight: 10,
+                                  padding: 6,
                                   borderRadius: 6,
-                                  backgroundColor: 'rgba(79, 195, 247, 0.12)',
+                                  backgroundColor: 'rgba(79, 195, 247, 0.15)',
                                 }}
                               >
-                                <SymbolView name="play.fill" size={13} tintColor="#4fc3f7" />
+                                <SymbolView name="play.fill" size={14} tintColor="#4fc3f7" />
                               </Pressable>
                             )}
 
-                            {alreadyDownloaded ? (
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <ThemedText type="code" style={{ fontSize: 9, color: '#4CAF50' }}>
-                                  Baixado
-                                </ThemedText>
+                            <Pressable
+                              onPress={() => toggleChapter(item)}
+                              disabled={alreadyDownloaded}
+                              hitSlop={8}
+                            >
+                              {alreadyDownloaded ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <ThemedText type="code" style={{ fontSize: 9, color: '#4CAF50' }}>
+                                    Baixado
+                                  </ThemedText>
+                                  <SymbolView
+                                    name="checkmark.circle.fill"
+                                    size={16}
+                                    tintColor="#4CAF50"
+                                  />
+                                </View>
+                              ) : (
                                 <SymbolView
-                                  name="checkmark.circle.fill"
-                                  size={16}
-                                  tintColor="#4CAF50"
+                                  name={isChecked ? 'checkmark.square.fill' : 'square'}
+                                  size={18}
+                                  tintColor={isChecked ? theme.accent : theme.textSecondary}
                                 />
-                              </View>
-                            ) : (
-                              <SymbolView
-                                name={isChecked ? 'checkmark.square.fill' : 'square'}
-                                size={16}
-                                tintColor={isChecked ? theme.accent : theme.textSecondary}
-                              />
-                            )}
-                          </Pressable>
+                              )}
+                            </Pressable>
+                          </View>
                         );
                       })}
                       {displayedChapters.length === 0 && (
@@ -1020,47 +1069,46 @@ export default function MangaDetailsModal({ isOpen, onClose, onShowToast, onOpen
             </SafeAreaView>
           )
         )}
+        {mangaDetails && (
+          <OnlineReaderModal
+            isOpen={isOnlineReaderOpen}
+            onClose={() => {
+              setIsOnlineReaderOpen(false);
+              setOnlineReaderChapter(null);
+            }}
+            mangaTitle={
+              readingSource === 'novelfull.com' && novelFullDetails
+                ? novelFullDetails.title
+                : readingSource === 'mangadex.org' && mangaDexDetails
+                  ? mangaDexDetails.title
+                  : mangaDetails.title
+            }
+            mangaType={
+              readingSource === 'novelfull.com'
+                ? 'Novel'
+                : readingSource === 'mangadex.org'
+                  ? 'Manga'
+                  : (selectedType || (mangaDetails as any).mangaType)
+            }
+            chapters={
+              readingSource === 'novelfull.com' && novelFullDetails
+                ? novelFullDetails.chapters
+                : readingSource === 'mangadex.org' && mangaDexDetails
+                  ? mangaDexDetails.chapters
+                  : mangaDetails.chapters
+            }
+            chapterUrls={
+              readingSource === 'novelfull.com' && novelFullDetails
+                ? (novelFullDetails.chapterUrls || {})
+                : readingSource === 'mangadex.org' && mangaDexDetails
+                  ? (mangaDexDetails.chapterUrls || {})
+                  : (mangaDetails.chapterUrls || {})
+            }
+            initialChapter={onlineReaderChapter}
+          />
+        )}
       </ThemedView>
     </Modal>
-
-    {mangaDetails && (
-      <OnlineReaderModal
-        isOpen={isOnlineReaderOpen}
-        onClose={() => {
-          setIsOnlineReaderOpen(false);
-          setOnlineReaderChapter(null);
-        }}
-        mangaTitle={
-          readingSource === 'novelfull.com' && novelFullDetails
-            ? novelFullDetails.title
-            : readingSource === 'mangadex.org' && mangaDexDetails
-              ? mangaDexDetails.title
-              : mangaDetails.title
-        }
-        mangaType={
-          readingSource === 'novelfull.com'
-            ? 'Novel'
-            : readingSource === 'mangadex.org'
-              ? 'Manga'
-              : (selectedType || (mangaDetails as any).mangaType)
-        }
-        chapters={
-          readingSource === 'novelfull.com' && novelFullDetails
-            ? novelFullDetails.chapters
-            : readingSource === 'mangadex.org' && mangaDexDetails
-              ? mangaDexDetails.chapters
-              : mangaDetails.chapters
-        }
-        chapterUrls={
-          readingSource === 'novelfull.com' && novelFullDetails
-            ? (novelFullDetails.chapterUrls || {})
-            : readingSource === 'mangadex.org' && mangaDexDetails
-              ? (mangaDexDetails.chapterUrls || {})
-              : (mangaDetails.chapterUrls || {})
-        }
-        initialChapter={onlineReaderChapter}
-      />
-    )}
   </>
   );
 }

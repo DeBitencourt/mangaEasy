@@ -143,6 +143,23 @@ export const createHomeStyles = (theme: any) => StyleSheet.create({
     marginTop: Spacing.one,
     marginBottom: Spacing.one,
   },
+  cardTagsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: Spacing.one,
+    marginBottom: Spacing.one,
+  },
+  cardTagBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 4,
+  },
+  cardTagText: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
   starIcon: {
     marginRight: 2,
   },
